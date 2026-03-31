@@ -62,7 +62,7 @@ These bugs were found and fixed through systematic auditing:
 
 2. **MulLambdaModN sign-extension bug** — 64-bit intermediate values were sign-extended incorrectly, corrupting scalar multiplication results for certain input patterns.
 
-All fixes were validated by successfully solving **Puzzle 79** (known answer) and cross-referencing against reference implementations.
+All fixes were validated by successfully solving **Puzzle 80** (known answer) and cross-referencing against reference implementations.
 
 ## Requirements
 
