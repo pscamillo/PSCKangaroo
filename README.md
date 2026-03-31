@@ -54,7 +54,7 @@ The key insight was that with a large RAM-to-GPU ratio, the optimal strategy cha
 
 These choices reflect the reality that most individual hunters run a single GPU with as much RAM as they can afford, rather than multi-GPU clusters. The architecture is optimized for that profile.
 
-## Bug Fixes Over Original RCKangaroo
+## Bug Fixes During Development
 
 These bugs were found and fixed through systematic auditing:
 
