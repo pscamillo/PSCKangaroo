@@ -252,7 +252,7 @@ The **SOTA method** (by RetiredCoder) uses equivalence classes and the negation 
 
 - **[RetiredCoder (RC)](https://github.com/RetiredC)** — Original RCKangaroo, SOTA method, SOTA+ Cheap Second Point theory, GPU kernel architecture, batch Montgomery inversion. The vast majority of the code and all core algorithmic innovations are his work.
 - **[JeanLucPons](https://github.com/JeanLucPons)** — Foundational Kangaroo/VanitySearch/BSGS implementations that inspired the ecosystem.
-- **PSC** — Bug fixes (endomorphism constants, sign-extension, Bloom filter), ALL-TAME mode, XDP, ultra-compact DP format, async BSGS resolver, table freeze, checkpoint system, and various integrations.
+- **PSC** — ALL-TAME mode, XDP, ultra-compact DP format, async BSGS resolver, table freeze, checkpoint system, and various integrations.
 
 ## License
 
