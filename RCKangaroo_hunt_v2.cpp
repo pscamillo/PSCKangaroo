@@ -2344,7 +2344,7 @@ int main(int argc, char* argv[])
     printf("\033[1;36m  Fork of RCKangaroo by RetiredCoder (RC)\033[0m\n");
     printf("  Original: https://github.com/RetiredC/RCKangaroo\n");
     printf("  Special thanks to RC for SOTA!\n");
-    printf("  License.:  GPLv3\n");
+    printf("  License:  GPLv3\n");
     printf("\n");
     printf("================================================================================\n");
     printf("\n");
