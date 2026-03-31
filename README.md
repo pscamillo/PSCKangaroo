@@ -2,8 +2,7 @@
 
 GPU-accelerated **Pollard's Kangaroo** algorithm for solving the Elliptic Curve Discrete Logarithm Problem (ECDLP) on **secp256k1**.
 
-A fork of [RCKangaroo](https://github.com/RetiredC/RCKangaroo) by [RetiredCoder](https://github.com/RetiredC), with bug fixes, new modes, and optimizations.
-Special thanks to RetiredCoder for SOTA!
+A fork of [RCKangaroo](https://github.com/RetiredC/RCKangaroo) by [RetiredCoder](https://github.com/RetiredC), with new modes and optimizations. Special thanks to RetiredCoder for SOTA!
 
 ## What is this?
 
@@ -13,20 +12,21 @@ This is primarily aimed at the [Bitcoin Puzzle Transaction](https://bitcointalk.
 
 ## Features
 
-### Core Algorithm
+### Core Algorithm (from RCKangaroo)
 - **SOTA method** (State of the Art) — Equivalence Classes + Negation Map, achieving the theoretical optimum K ≈ 1.15
 - **SOTA+ Cheap Second Point** — observes `P - J` for free during `P + J` computation, effectively doubling DP generation rate
-- **3x Endomorphism** — exploits secp256k1's cube root of unity (β) to search 3 equivalent points per kangaroo step
+- **Batch Montgomery inversion** — amortizes modular inversions across groups of point additions
+- **PTX inline assembly** — critical 256-bit arithmetic uses hand-tuned PTX instructions
 
-### Optimizations
+### Added by PSCKangaroo
+- **3x Endomorphism** — exploits secp256k1's cube root of unity (β) to search 3 equivalent points per kangaroo step
 - **XDP (Extended Distinguished Points)** — threshold-based DP detection accepts multiple patterns instead of just zero, multiplying DP rate by 8x (configurable: 1x, 2x, 4x, 8x, 16x)
 - **Ultra-compact 16-byte DP entries** — 56% more entries fit in RAM compared to the original 25-byte format
 - **Async BSGS resolver** — multi-threaded Baby-Step Giant-Step resolves truncated-distance collisions in background
 - **Dual hash table** — separate tables for WILD1/WILD2 (or TAME/WILD) with cross-collision detection
 - **Table freeze** — tables become read-only when full, preventing false-positive explosion from overwrites
 - **Uniform jumps** — benchmarked 19% faster than stratified jump tables for large puzzles
-- **Batch Montgomery inversion** — amortizes modular inversions across groups of point additions
-- **PTX inline assembly** — critical 256-bit arithmetic uses hand-tuned PTX instructions
+- **Shard-locked reads** — eliminates torn-read false positives in concurrent hash table access
 
 ### Modes
 - **ALL-TAME** (default, recommended for 130+ bits) — fills all RAM with TAME points, then hunts with 100% WILDs. Maximizes T-W collision probability.
@@ -36,7 +36,6 @@ This is primarily aimed at the [Bitcoin Puzzle Transaction](https://bitcointalk.
 ### Reliability
 - **Checkpoints** — auto-save at configurable intervals + safe exit on Ctrl+C (format RCKDT5C)
 - **Savedps** — evicted DPs saved to disk for offline cross-checking
-- **Shard-locked reads** — eliminates torn-read false positives in concurrent hash table access
 
 ## Design Rationale
 
@@ -56,13 +55,13 @@ These choices reflect the reality that most individual hunters run a single GPU 
 
 ## Bug Fixes During Development
 
-These bugs were found and fixed through systematic auditing:
+These bugs were introduced and fixed during the development of PSCKangaroo's endomorphism feature (not present in the original RCKangaroo):
 
-1. **Wrong BETA2/LAMBDA/LAMBDA2 constants** — the endomorphism constants were incorrect, causing missed collisions. Verified against `bitcoin-core/secp256k1` and `noble-secp256k1`. This fix alone yielded ~2x speedup on Puzzle 79 (consistent with the theoretical √3 endomorphism gain).
+1. **Wrong BETA2/LAMBDA/LAMBDA2 constants** — the endomorphism constants were initially incorrect, causing missed collisions. Verified against `bitcoin-core/secp256k1` and `noble-secp256k1`. Fixing these yielded ~2x speedup (consistent with the theoretical √3 endomorphism gain).
 
 2. **MulLambdaModN sign-extension bug** — 64-bit intermediate values were sign-extended incorrectly, corrupting scalar multiplication results for certain input patterns.
 
-All fixes were validated by successfully solving **Puzzle 80** (known answer) and cross-referencing against reference implementations.
+All fixes were validated by successfully solving **Puzzle #80** (known answer) and cross-referencing against reference implementations.
 
 ## Requirements
 
@@ -231,7 +230,7 @@ The **SOTA method** (by RetiredCoder) uses equivalence classes and the negation 
 
 ### v54
 - SOTA+ Cheap Second Point: observes P-J during P+J for ~2x DP rate
-- Validated by solving Puzzle 79 (known answer)
+- Validated by solving Puzzle #80 (known answer)
 
 ### v53
 - ALL-TAME mode: dedicates all RAM to TAMEs for maximum T-W probability
@@ -244,15 +243,14 @@ The **SOTA method** (by RetiredCoder) uses equivalence classes and the negation 
 ### Earlier versions
 - XDP (Extended Distinguished Points) with configurable multiplier
 - Dual hash table with cross-type collision detection
-- GPU Bloom filter (byte-index bug fixed)
 - Uniform jumps (19% faster than stratified, benchmarked)
 - Shard-locked reads for concurrent access safety
 
 ## Credits
 
-- **[RetiredCoder (RC)](https://github.com/RetiredC)** — Original RCKangaroo, SOTA method, SOTA+ Cheap Second Point theory, GPU kernel architecture, batch Montgomery inversion. The vast majority of the code and all core algorithmic innovations are his work.
+- **[RetiredCoder (RC)](https://github.com/RetiredC)** — Original RCKangaroo, SOTA method, SOTA+ Cheap Second Point theory, GPU kernel architecture, batch Montgomery inversion, PTX inline assembly. The vast majority of the code and all core algorithmic innovations are his work.
 - **[JeanLucPons](https://github.com/JeanLucPons)** — Foundational Kangaroo/VanitySearch/BSGS implementations that inspired the ecosystem.
-- **PSC** — ALL-TAME mode, XDP, ultra-compact DP format, async BSGS resolver, table freeze, checkpoint system, and various integrations.
+- **PSC** — 3x endomorphism, ALL-TAME mode, XDP, ultra-compact DP format, async BSGS resolver, table freeze, checkpoint system, dual hash table, and various integrations.
 
 ## License
 
