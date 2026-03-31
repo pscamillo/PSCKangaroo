@@ -3,6 +3,7 @@
 GPU-accelerated **Pollard's Kangaroo** algorithm for solving the Elliptic Curve Discrete Logarithm Problem (ECDLP) on **secp256k1**.
 
 A fork of [RCKangaroo](https://github.com/RetiredC/RCKangaroo) by [RetiredCoder](https://github.com/RetiredC), with bug fixes, new modes, and optimizations.
+Special thanks to RetiredCoder for SOTA!
 
 ## What is this?
 
@@ -78,7 +79,7 @@ All fixes were validated by successfully solving **Puzzle 79** (known answer) an
 
 ```bash
 # Clone the repository
-git clone https://github.com/user/PSCKangaroo.git
+git clone https://github.com/pscamillo/PSCKangaroo.git
 cd PSCKangaroo
 
 # Edit Makefile if needed: set GPU_ARCH for your GPU
