@@ -12,7 +12,7 @@
 //   v48:  Corrected W-W collision handling + Hybrid preload mode
 //   v47:  Tame-Wild mode fix (TRAP/HUNT with dual table)
 //   v45:  GPU Occupancy tuning + Large Table support
-//   XDP:  Extended Distinguished Points (threshold-based, configurable multiplier)
+//   v56C: Ultra-compact 16-byte entries (+56% capacity) + Async BSGS resolver
 
 // =============================================================================
 // V46 STRATIFIED JUMP CONFIGURATION
@@ -45,40 +45,9 @@
 #pragma once
 
 // =============================================================================
-// XDP CONFIGURATION (Extended Distinguished Points)
+// Distinguished Point check (original method)
 // =============================================================================
-// XDP_MULT: Multiplier for DP rate (must be power of 2: 1, 2, 4, 8, 16)
-//
-// RECOMMENDATIONS:
-// - DP 30-34: XDP_MULT = 4  (4x more DPs)
-// - DP 35-38: XDP_MULT = 8  (8x more DPs) [RECOMMENDED FOR PUZZLE 135]
-// - DP 39+:   XDP_MULT = 16 (16x more DPs)
-//
-// With low DP (<28), XDP is not needed (already enough DPs)
-// With high DP (>40), consider XDP 16x
-// =============================================================================
-
-#ifndef XDP_MULT
-#define XDP_MULT 8   // Default: 8x more DPs (recommended for DP 35-38)
-#endif
-
-// Validation: XDP_MULT must be a power of 2
-#if (XDP_MULT != 1) && (XDP_MULT != 2) && (XDP_MULT != 4) && (XDP_MULT != 8) && (XDP_MULT != 16)
-#error "XDP_MULT must be 1, 2, 4, 8, or 16"
-#endif
-
-// =============================================================================
-// XDP MACRO - Distinguished Point check with threshold
-// =============================================================================
-// Replaces: (x3 & dp_mask) == 0     (accepts only pattern 0)
-// With:       (x3 >> shift) < XDP_MULT (accepts patterns 0 to XDP_MULT-1)
-//
-// Mathematically equivalent to accepting XDP_MULT patterns instead of 1,
-// increasing DP rate by XDP_MULT times.
-// =============================================================================
-
-#define IS_DP_XDP(x3, dp_bits) \
-    (((x3) >> (64 - (dp_bits))) < XDP_MULT) 
+#define IS_DP(x3, dp_bits) (((x3) >> (64 - (dp_bits))) == 0)
 
 // =============================================================================
 // V45 CONFIGURATION - GPU OCCUPANCY & TABLE SIZE
@@ -165,38 +134,17 @@ typedef char i8;
 #define WILD2				2  // Wild kangs2
 
 #define GPU_DP_SIZE			48
-// v52: Reduced from 16M to 1M. With GroupCnt=24, each kernel produces ~2K DPs (XDP 8x).
-// 1M entries = ~450 kernel calls worth. Saves 720 MB GPU RAM.
-// v53: Increased from 1M to 3M - canonical DP check generates ~3x more DPs
-// v54 CHEAP: Increased from 3M to 5M - cheap second point generates ~2x more DPs
-#define MAX_DP_CNT			(5 * 1024 * 1024)
+#define MAX_DP_CNT			(1024 * 1024)
 
 #define JMP_MASK			(JMP_CNT-1)
 
 #define DPTABLE_MAX_CNT		16
 
-// v52: Reduced from 32M to 2M. With GroupCnt=24 + XDP 8x, ~2K DPs/kernel.
-// 2M buffer = ~900 kernel calls. CPU buffer: 96 MB vs 1.5 GB before.
 #define MAX_CNT_LIST		(2 * 1024 * 1024)
 
 #define DP_FLAG				0x8000
 #define INV_FLAG			0x4000
 #define JMP2_FLAG			0x2000
-#define CHEAP_FLAG			0x1000
-
-// =============================================================================
-// SOTA+ CHEAP SECOND POINT
-// =============================================================================
-// When computing P + J, we can also cheaply compute P - J because the
-// modular inverse of (xP - xJ) is already available from batch inversion.
-// Cost: ~1 AddModP + 1 MulModP + 1 SqrModP + 2 SubModP per group
-// Benefit: ~2x DP generation rate → effective ~15-20% speedup
-// The cheap point does NOT alter the kangaroo trajectory.
-// It's a free "observation" at an opposite-direction position.
-// =============================================================================
-#ifndef USE_CHEAP_POINT
-#define USE_CHEAP_POINT 1
-#endif
 
 #define MD_LEN				10
 
@@ -228,11 +176,6 @@ struct TKparams
 	u32* LoopedKangs;
 	bool IsGenMode; //tames generation mode
 	bool AllWildsMode; //HUNT optimization: all kangaroos are WILDs
-	
-	// GPU-Side Bloom Filter
-	u8* GpuBloom;           // Bloom filter in GPU memory (2GB)
-	u64 GpuBloomSize;       // Size in bits
-	bool UseGpuBloom;       // Enable GPU-side Bloom checking during HUNT
 
 	u32 KernelA_LDS_Size;
 	u32 KernelB_LDS_Size;

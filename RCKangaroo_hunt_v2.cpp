@@ -11,7 +11,7 @@
 #include <iostream>
 #include <vector>
 #include <signal.h>
-#include <cmath>   // v38.5 XDP: for pow() in expected DPs/s calculation
+#include <cmath>
 #include <ctime>   // v38.5 CHECKPOINT: for time()
 
 #ifndef _WIN32
@@ -1549,8 +1549,8 @@ void ShowStats(u64 tm_start, double exp_ops, double dp_val)
         double wild_load = gTameStore.GetWildLoadFactor();
         u64 fp_count = gFalsePositives.load();  // v40.1
         
-        // v38.5 XDP: Calculate expected DPs/s for display
-        double expected_dps = (double)speed * 1000000.0 / pow(2.0, gDP) * XDP_MULT;
+        // Calculate expected DPs/s for display
+        double expected_dps = (double)speed * 1000000.0 / pow(2.0, gDP);
         
         printf("  Speed: %.2f GKeys/s | Time: %llud %02dh %02dm | Wave #%llu\r\n", 
                speed / 1000.0, days, hours, min, wave);
@@ -1559,16 +1559,16 @@ void ShowStats(u64 tm_start, double exp_ops, double dp_val)
         
         // Smart display: show absolute value when small, M when large
         if (wild_stored < 1000000) {
-            printf("  WILDs stored: %llu / %.0fM (%.4f%% load) [XDP %dx: ~%.2f DPs/s]\r\n",
+            printf("  WILDs stored: %llu / %.0fM (%.4f%% load) [~%.2f DPs/s]\r\n",
                    wild_stored, gTameStore.GetWildTableSize() / 1000000.0, wild_load,
-                   XDP_MULT, expected_dps);
+                   expected_dps);
         } else {
-            const char* freeze_tag = gTameStore.IsAnyFrozen() ? " ❄ FROZEN" : "";
-            printf("  W1: %.0fM  W2: %.0fM  Total: %.0fM / %.0fM (%.2f%% load) [XDP %dx]%s\r\n",
+            const char* freeze_tag = gTameStore.IsAnyFrozen() ? " FROZEN" : "";
+            printf("  W1: %.0fM  W2: %.0fM  Total: %.0fM / %.0fM (%.2f%% load)%s\r\n",
                    gTameStore.GetWild1Count() / 1000000.0,
                    gTameStore.GetWild2Count() / 1000000.0,
                    wild_stored / 1000000.0, gTameStore.GetWildTableSize() / 1000000.0, wild_load,
-                   XDP_MULT, freeze_tag);
+                   freeze_tag);
         }
         
         // v45: Show savedps disk usage
@@ -1702,7 +1702,7 @@ bool SolvePoint(EcPoint PntToSolve, int Range, int DP, EcInt* pk_res)
         }
     }
 
-    printf("\r\nSolving point: Range %d bits, DP %d, XDP %dx\r\n", Range, DP, XDP_MULT);
+    printf("\r\nSolving point: Range %d bits, DP %d\r\n", Range, DP);
     double ops = 1.15 * pow(2.0, Range / 2.0);
     double dp_val = (double)(1ull << DP);
     
@@ -2020,32 +2020,7 @@ bool SolvePoint(EcPoint PntToSolve, int Range, int DP, EcInt* pk_res)
                     }
                 }
                 
-                // GPU-SIDE BLOOM: Copy Bloom filter to GPU for faster filtering
-                // NOTE: When WILD-WILD is enabled, we SKIP GPU Bloom to maximize WILD storage!
-                // GPU Bloom filters out 99.7% of DPs, which hurts WILD-WILD collision chances.
-                int gpu_bloom_success = 0;
-                if (!gWildWildEnabled) {
-                    printf("Setting up GPU-side Bloom filter...\r\n");
-                    u8* bloom_ptr = gTameStore.GetBloomPointer();
-                    size_t bloom_size = gTameStore.GetBloomSizeBytes();
-                    for (int i = 0; i < GpuCnt; i++) {
-                        if (GpuKangs[i]->AllocateGpuBloom(bloom_size)) {
-                            if (GpuKangs[i]->CopyBloomToGpu(bloom_ptr, bloom_size)) {
-                                GpuKangs[i]->EnableGpuBloom(true);
-                                gpu_bloom_success++;
-                            }
-                        }
-                    }
-                    if (gpu_bloom_success == GpuCnt) {
-                        printf("GPU-side Bloom filtering ACTIVE - WILDs filtered on GPU!\r\n");
-                    } else {
-                        printf("GPU-side Bloom FAILED - All WILDs sent to CPU for verification\r\n");
-                    }
-                } else {
-                    printf("GPU Bloom SKIPPED - WILD-WILD mode needs ALL DPs for maximum collision chance!\r\n");
-                }
-                
-                printf("All WILDs Mode: 100%% kangaroos hunting (+50%% efficiency!)\r\n");
+                printf("All WILDs Mode: 100%% kangaroos hunting!\r\n");
                 if (gWaveIntervalMin > 0) {
                     printf("Smart Waves enabled: New wave every %d minutes\r\n", gWaveIntervalMin);
                 } else {
@@ -2349,7 +2324,7 @@ int main(int argc, char* argv[])
     printf("================================================================================\n");
     printf("\n");
     printf("  Core algorithm:  SOTA (Equivalence Classes + Negation Map, K~1.15)\n");
-    printf("  Optimizations:   Cheap Second Point (SOTA+) | XDP %dx | 3x Endomorphism\n", XDP_MULT);
+    printf("  Optimizations:   SOTA+ | ALL-TAME mode | 16-byte compact entries | Async BSGS\n");
     printf("                   Ultra-compact 16-byte DPs | Async BSGS resolver\n");
     printf("                   Dual hash table | Table freeze | Uniform jumps\n");
     printf("  Modes:           ALL-TAME (recommended 130+ bits) | ALL-WILD | TRAP/HUNT\n");

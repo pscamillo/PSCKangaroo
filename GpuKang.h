@@ -80,12 +80,6 @@ public:
 	u64 GetWaveNumber() { return WaveNumber; }
 	void SetResonantSpawn(bool enable) { UseResonantSpawn = enable; }  // v34: Enable resonant spawning
 	
-	// GPU-Side Bloom Filter
-	bool AllocateGpuBloom(size_t bloom_size_bytes);  // Allocate Bloom in GPU memory
-	bool CopyBloomToGpu(const u8* cpu_bloom, size_t bloom_size_bytes);  // Copy Bloom from CPU to GPU
-	void EnableGpuBloom(bool enable);  // Enable/disable GPU Bloom checking
-	void FreeGpuBloom();  // Free GPU Bloom memory
-
 	u32 dbg[256];
 
 	int GetStatsSpeed();

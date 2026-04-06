@@ -8,9 +8,6 @@
 #include "defs.h"
 #include "RCGpuUtils.h"
 
-// ENDOMORPHISM 6x: Set to 1 to enable, 0 to disable
-#define USE_ENDOMORPHISM 1
-
 //imp2 table points for KernelA
 __device__ __constant__ u64 jmp2_table[8 * JMP_CNT];
 
@@ -162,25 +159,8 @@ __global__ void KernelA(const TKparams Kparams)
 				jmp_ind |= JMP2_FLAG;
 			}
 			
-			// v53 ENDO: Compute canonical X BEFORE DP check
-			// Endo-equivalent points (x, β·x, β²·x) → same canonical → same DP decision → √3 speedup
-#if USE_ENDOMORPHISM
-			{
-				__align__(16) u64 canonical_x[4];
-				u32 endo = GetCanonicalX(canonical_x, x);
-				if (IS_DP_XDP(canonical_x[3], Kparams.DP))
-				{
-					u32 kang_ind = (THREAD_X + BLOCK_X * BLOCK_SIZE) * PNT_GROUP_CNT + group;
-					u32 ind = atomicAdd(Kparams.DPTable + kang_ind, 1);
-					ind = min(ind, DPTABLE_MAX_CNT - 1);
-					int4* dst = (int4*)(Kparams.DPTable + Kparams.KangCnt + (kang_ind * DPTABLE_MAX_CNT + ind) * 4);
-					dst[0] = ((int4*)canonical_x)[0];
-					dst[0].w = (dst[0].w & 0x3FFFFFFF) | (endo << 30);
-					jmp_ind |= DP_FLAG;
-				}
-			}
-#else
-			if (IS_DP_XDP(x[3], Kparams.DP))
+			// DP check — original method (raw X)
+			if (IS_DP(x[3], Kparams.DP))
 			{
 				u32 kang_ind = (THREAD_X + BLOCK_X * BLOCK_SIZE) * PNT_GROUP_CNT + group;
 				u32 ind = atomicAdd(Kparams.DPTable + kang_ind, 1);
@@ -189,49 +169,6 @@ __global__ void KernelA(const TKparams Kparams)
 				dst[0] = ((int4*)x)[0];
 				jmp_ind |= DP_FLAG;
 			}
-#endif
-
-#if USE_CHEAP_POINT
-			// ================================================================
-			// v54 SOTA+ CHEAP SECOND POINT
-			// P - J reuses the same modular inverse as P + J.
-			// Numerator: (y0 + jmp_y) instead of (y0 - jmp_y).
-			// Cost: 1 Add + 1 Mul + 1 Sqr + 2 Sub + GetCanonicalX
-			// Benefit: ~2x DP rate. Does NOT change kangaroo trajectory.
-			// ================================================================
-			{
-				__align__(16) u64 x_cheap[4];
-				AddModP(tmp, y0, jmp_y);
-				MulModP(tmp2, tmp, dxs);
-				SqrModP(tmp, tmp2);
-				SubModP(x_cheap, tmp, jmp_x);
-				SubModP(x_cheap, x_cheap, x0);
-#if USE_ENDOMORPHISM
-				__align__(16) u64 cheap_canon[4];
-				u32 cheap_endo = GetCanonicalX(cheap_canon, x_cheap);
-				if (IS_DP_XDP(cheap_canon[3], Kparams.DP))
-				{
-					u32 kang_ind = (THREAD_X + BLOCK_X * BLOCK_SIZE) * PNT_GROUP_CNT + group;
-					u32 ind = atomicAdd(Kparams.DPTable + kang_ind, 1);
-					ind = min(ind, DPTABLE_MAX_CNT - 1);
-					int4* dst = (int4*)(Kparams.DPTable + Kparams.KangCnt + (kang_ind * DPTABLE_MAX_CNT + ind) * 4);
-					dst[0] = ((int4*)cheap_canon)[0];
-					dst[0].w = (dst[0].w & 0x3FFFFFFF) | (cheap_endo << 30);
-					jmp_ind |= CHEAP_FLAG;
-				}
-#else
-				if (IS_DP_XDP(x_cheap[3], Kparams.DP))
-				{
-					u32 kang_ind = (THREAD_X + BLOCK_X * BLOCK_SIZE) * PNT_GROUP_CNT + group;
-					u32 ind = atomicAdd(Kparams.DPTable + kang_ind, 1);
-					ind = min(ind, DPTABLE_MAX_CNT - 1);
-					int4* dst = (int4*)(Kparams.DPTable + Kparams.KangCnt + (kang_ind * DPTABLE_MAX_CNT + ind) * 4);
-					dst[0] = ((int4*)x_cheap)[0];
-					jmp_ind |= CHEAP_FLAG;
-				}
-#endif
-			}
-#endif
 
 			lds_jlist[8 * THREAD_X + (group % 8)] = jmp_ind;
 			if ((group % 8) == 0)
@@ -460,25 +397,8 @@ __global__ void KernelA(const TKparams Kparams)
 				jmp_ind |= JMP2_FLAG;
 			}
 
-			// v53 ENDO: Compute canonical X BEFORE DP check
-			// Endo-equivalent points (x, β·x, β²·x) → same canonical → same DP decision → √3 speedup
-#if USE_ENDOMORPHISM
-			{
-				__align__(16) u64 canonical_x[4];
-				u32 endo = GetCanonicalX(canonical_x, x);
-				if (IS_DP_XDP(canonical_x[3], Kparams.DP))
-				{
-					u32 kang_ind = (THREAD_X + BLOCK_X * BLOCK_SIZE) * PNT_GROUP_CNT + group;
-					u32 ind = atomicAdd(Kparams.DPTable + kang_ind, 1);
-					ind = min(ind, DPTABLE_MAX_CNT - 1);
-					int4* dst = (int4*)(Kparams.DPTable + Kparams.KangCnt + (kang_ind * DPTABLE_MAX_CNT + ind) * 4);
-					dst[0] = ((int4*)canonical_x)[0];
-					dst[0].w = (dst[0].w & 0x3FFFFFFF) | (endo << 30);
-					jmp_ind |= DP_FLAG;
-				}
-			}
-#else
-			if (IS_DP_XDP(x[3], Kparams.DP))
+			// DP check — original method (raw X)
+			if (IS_DP(x[3], Kparams.DP))
 			{
 				u32 kang_ind = (THREAD_X + BLOCK_X * BLOCK_SIZE) * PNT_GROUP_CNT + group;
 				u32 ind = atomicAdd(Kparams.DPTable + kang_ind, 1);
@@ -487,43 +407,6 @@ __global__ void KernelA(const TKparams Kparams)
 				dst[0] = ((int4*)x)[0];
 				jmp_ind |= DP_FLAG;
 			}
-#endif
-
-#if USE_CHEAP_POINT
-			// v54 SOTA+ CHEAP SECOND POINT (old GPU version, uses dx0)
-			{
-				__align__(16) u64 x_cheap[4];
-				AddModP(tmp, y0, jmp_y);
-				MulModP(tmp2, tmp, dx0);
-				SqrModP(tmp, tmp2);
-				SubModP(x_cheap, tmp, jmp_x);
-				SubModP(x_cheap, x_cheap, x0);
-#if USE_ENDOMORPHISM
-				__align__(16) u64 cheap_canon[4];
-				u32 cheap_endo = GetCanonicalX(cheap_canon, x_cheap);
-				if (IS_DP_XDP(cheap_canon[3], Kparams.DP))
-				{
-					u32 kang_ind = (THREAD_X + BLOCK_X * BLOCK_SIZE) * PNT_GROUP_CNT + group;
-					u32 ind = atomicAdd(Kparams.DPTable + kang_ind, 1);
-					ind = min(ind, DPTABLE_MAX_CNT - 1);
-					int4* dst = (int4*)(Kparams.DPTable + Kparams.KangCnt + (kang_ind * DPTABLE_MAX_CNT + ind) * 4);
-					dst[0] = ((int4*)cheap_canon)[0];
-					dst[0].w = (dst[0].w & 0x3FFFFFFF) | (cheap_endo << 30);
-					jmp_ind |= CHEAP_FLAG;
-				}
-#else
-				if (IS_DP_XDP(x_cheap[3], Kparams.DP))
-				{
-					u32 kang_ind = (THREAD_X + BLOCK_X * BLOCK_SIZE) * PNT_GROUP_CNT + group;
-					u32 ind = atomicAdd(Kparams.DPTable + kang_ind, 1);
-					ind = min(ind, DPTABLE_MAX_CNT - 1);
-					int4* dst = (int4*)(Kparams.DPTable + Kparams.KangCnt + (kang_ind * DPTABLE_MAX_CNT + ind) * 4);
-					dst[0] = ((int4*)x_cheap)[0];
-					jmp_ind |= CHEAP_FLAG;
-				}
-#endif
-			}
-#endif
 
 			lds_jlist[8 * THREAD_X + (group % 8)] = jmp_ind;
 			if (((group + jlast_add) % 8) == 0)
@@ -601,33 +484,6 @@ __global__ void KernelA(const TKparams Kparams)
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-// GPU-side Bloom filter check
-// Returns true if X MIGHT be in the set (need to verify in CPU hash table)
-// Returns false if X is DEFINITELY NOT in the set (skip CPU check)
-__device__ __forceinline__ bool GpuBloomCheck(const u8* GpuBloom, u64 BloomSize, const u8* x_bytes)
-{
-    // Same hash functions as CPU TameStore
-    #define GPU_BLOOM_HASHES 4
-    
-    for (int i = 0; i < GPU_BLOOM_HASHES; i++) {
-        // Simple but effective hash
-        u64 h = 0x9E3779B9 + i * 0x85EBCA6B;
-        for (int j = 0; j < 12; j++) {
-            h ^= x_bytes[j];
-            h *= 0x5BD1E995;
-            h ^= h >> 15;
-        }
-        
-        u64 bit_idx = h % BloomSize;
-        u64 byte_idx = bit_idx / 8;
-        u8 bit_mask = 1 << (bit_idx % 8);
-        
-        if (!(GpuBloom[byte_idx] & bit_mask))
-            return false;  // Definitely not in set
-    }
-    return true;  // Might be in set
-}
-
 __device__ __forceinline__ void BuildDP(const TKparams& Kparams, int kang_ind, u64* d)
 {
 	int ind = atomicAdd(Kparams.DPTable + kang_ind, 0x10000);
@@ -636,7 +492,6 @@ __device__ __forceinline__ void BuildDP(const TKparams& Kparams, int kang_ind, u
 		return;
 	int4 rx = *(int4*)(Kparams.DPTable + Kparams.KangCnt + (kang_ind * DPTABLE_MAX_CNT + ind) * 4);
 	
-	// Determine kang_type early for Bloom check
 	u32 kang_type;
 	if (Kparams.AllWildsMode) {
 		kang_type = 1 + (kang_ind & 1);  // WILD1 or WILD2
@@ -644,44 +499,13 @@ __device__ __forceinline__ void BuildDP(const TKparams& Kparams, int kang_ind, u
 		kang_type = 3 * kang_ind / Kparams.KangCnt;
 	}
 	
-	// GPU-side Bloom filter check for WILDs during HUNT
-	if (Kparams.UseGpuBloom && Kparams.GpuBloom != nullptr && kang_type != 0) {
-		// Extract X bytes for Bloom check (first 12 bytes of rx)
-		u8 x_bytes[16];
-		*((int4*)x_bytes) = rx;
-		
-		// Clear endo bits if present
-		// v56C FIX: Endo bits are in bits 30-31 of .w = byte 15, not byte 12
-		// Note: GpuBloomCheck only hashes bytes 0-11, so this is defensive code
-#if USE_ENDOMORPHISM
-		x_bytes[15] &= 0x3F;  // Clear bits 30-31 of .w (byte 15 in little-endian)
-#endif
-		
-		// Check Bloom - if definitely not present, skip this DP entirely
-		if (!GpuBloomCheck(Kparams.GpuBloom, Kparams.GpuBloomSize, x_bytes)) {
-			return;  // Not in Bloom = definitely not in TAME table, skip!
-		}
-	}
-	
-	// Bloom says "maybe" or we're in TRAP mode - send to CPU
 	u32 pos = atomicAdd(Kparams.DPs_out, 1);
 	pos = min(pos, MAX_DP_CNT - 1);
 	u32* DPs = Kparams.DPs_out + 4 + pos * GPU_DP_SIZE / 4;
-#if USE_ENDOMORPHISM
-	// Extract endo transform from high bits of rx.w and clear them
-	u32 endo = (rx.w >> 30) & 0x3;
-	rx.w &= 0x3FFFFFFF;
-	*(int4*)&DPs[0] = rx;
-	*(int4*)&DPs[4] = ((int4*)d)[0];
-	*(u64*)&DPs[8] = d[2];
-	// Store kang_type in bits 0-1, endo_transform in bits 4-5
-	DPs[10] = kang_type | (endo << 4);
-#else
 	*(int4*)&DPs[0] = rx;
 	*(int4*)&DPs[4] = ((int4*)d)[0];
 	*(u64*)&DPs[8] = d[2];
 	DPs[10] = kang_type;
-#endif
 }
 
 __device__ __forceinline__ bool ProcessJumpDistance(u32 step_ind, u32 d_cur, u64* d, u32 kang_ind, u64* jmp1_d, u64* jmp2_d, const TKparams& Kparams, u64* table, u32* cur_ind, u8 iter)
@@ -722,24 +546,6 @@ __device__ __forceinline__ bool ProcessJumpDistance(u32 step_ind, u32 d_cur, u64
 	{		
 		if (d_cur & DP_FLAG)
 			BuildDP(Kparams, kang_ind, d);
-#if USE_CHEAP_POINT
-		if (d_cur & CHEAP_FLAG)
-		{
-			// Cheap point distance = d_before - J = d_after ∓ 2*J
-			// If forward added J (no INV), cheap subtracts 2*J
-			// If forward subtracted J (INV), cheap adds 2*J
-			__align__(8) u64 d_cheap[3];
-			d_cheap[0] = d[0]; d_cheap[1] = d[1]; d_cheap[2] = d[2];
-			if (d_cur & INV_FLAG) {
-				Add192to192(d_cheap, jmp);
-				Add192to192(d_cheap, jmp);
-			} else {
-				Sub192from192(d_cheap, jmp);
-				Sub192from192(d_cheap, jmp);
-			}
-			BuildDP(Kparams, kang_ind, d_cheap);
-		}
-#endif
 		return false;
 	}
 

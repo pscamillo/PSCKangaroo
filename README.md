@@ -14,13 +14,10 @@ This is primarily aimed at the [Bitcoin Puzzle Transaction](https://bitcointalk.
 
 ### Core Algorithm (from RCKangaroo)
 - **SOTA method** (State of the Art) — Equivalence Classes + Negation Map, achieving the theoretical optimum K ≈ 1.15
-- **SOTA+ Cheap Second Point** — observes `P - J` for free during `P + J` computation, effectively doubling DP generation rate
 - **Batch Montgomery inversion** — amortizes modular inversions across groups of point additions
 - **PTX inline assembly** — critical 256-bit arithmetic uses hand-tuned PTX instructions
 
 ### Added by PSCKangaroo
-- **3x Endomorphism** — exploits secp256k1's cube root of unity (β) to search 3 equivalent points per kangaroo step
-- **XDP (Extended Distinguished Points)** — threshold-based DP detection accepts multiple patterns instead of just zero, multiplying DP rate by 8x (configurable: 1x, 2x, 4x, 8x, 16x)
 - **Ultra-compact 16-byte DP entries** — 56% more entries fit in RAM compared to the original 25-byte format
 - **Async BSGS resolver** — multi-threaded Baby-Step Giant-Step resolves truncated-distance collisions in background
 - **Dual hash table** — separate tables for WILD1/WILD2 (or TAME/WILD) with cross-collision detection
@@ -53,15 +50,17 @@ The key insight was that with a large RAM-to-GPU ratio, the optimal strategy cha
 
 These choices reflect the reality that most individual hunters run a single GPU with as much RAM as they can afford, rather than multi-GPU clusters. The architecture is optimized for that profile.
 
-## Bug Fixes During Development
+## Development Notes
 
-These bugs were introduced and fixed during the development of PSCKangaroo's endomorphism feature (not present in the original RCKangaroo):
+Earlier versions of PSCKangaroo included GPU-side endomorphism (canonical form), a "cheap second point" (P−J), and extended distinguished points (XDP). These were removed after feedback from kTimesG on BitcoinTalk, who correctly pointed out that:
 
-1. **Wrong BETA2/LAMBDA/LAMBDA2 constants** — the endomorphism constants were initially incorrect, causing missed collisions. Verified against `bitcoin-core/secp256k1` and `noble-secp256k1`. Fixing these yielded ~2x speedup (consistent with the theoretical √3 endomorphism gain).
+- The canonical X form doesn't produce useful collisions below 254-bit ranges (endo-equivalent points aren't in the search interval, and jump selection uses raw X so trajectories don't converge).
+- The cheap second point generates DPs that no kangaroo will ever converge toward — dead weight.
+- XDP is functionally equivalent to simply lowering the DP parameter.
 
-2. **MulLambdaModN sign-extension bug** — 64-bit intermediate values were sign-extended incorrectly, corrupting scalar multiplication results for certain input patterns.
+The current codebase focuses on what genuinely helps: architecture optimizations for single-GPU + high-RAM setups.
 
-All fixes were validated by successfully solving **Puzzle #80** (known answer) and cross-referencing against reference implementations.
+Correctness validated by solving **Puzzle #80** (79-bit range, known answer).
 
 ## Requirements
 
@@ -102,9 +101,6 @@ make GPU_ARCH="-gencode=arch=compute_89,code=sm_89"
 
 # Larger hash table (for 128GB+ RAM systems):
 make V45_TABLE_BITS=33
-
-# Disable cheap second point (for A/B benchmarking):
-make USE_CHEAP_POINT=0
 ```
 
 ## Usage
@@ -223,13 +219,18 @@ The **SOTA method** (by RetiredCoder) uses equivalence classes and the negation 
 - Async BSGS resolver (4 threads, queue depth 4096, precomputed baby table)
 - Checkpoint format RCKDT5C
 
+### v57 (kTimesG cleanup)
+- Removed GPU endomorphism canonical form (doesn't help below 254-bit ranges)
+- Removed cheap second point P−J (DPs never converge — dead weight)
+- Removed XDP extended DP check (equivalent to lowering DP parameter)
+- Removed GPU-side Bloom filter
+- Kernel now uses original DP check method
+
 ### v55
-- Fixed endomorphism constants: BETA2, LAMBDA, LAMBDA2 (verified against bitcoin-core/secp256k1)
-- Fixed MulLambdaModN sign-extension bug
-- NormDistForLambda corrected
+- Endomorphism constants BETA2, LAMBDA, LAMBDA2 (later removed in v57)
 
 ### v54
-- SOTA+ Cheap Second Point: observes P-J during P+J for ~2x DP rate
+- Cheap Second Point (later removed in v57)
 - Validated by solving Puzzle #80 (known answer)
 
 ### v53
@@ -241,16 +242,16 @@ The **SOTA method** (by RetiredCoder) uses equivalence classes and the negation 
 - Reverted occupancy to 1 block/SM (256 regs/thread optimal)
 
 ### Earlier versions
-- XDP (Extended Distinguished Points) with configurable multiplier
 - Dual hash table with cross-type collision detection
 - Uniform jumps (19% faster than stratified, benchmarked)
 - Shard-locked reads for concurrent access safety
 
 ## Credits
 
-- **[RetiredCoder (RC)](https://github.com/RetiredC)** — Original RCKangaroo, SOTA method, SOTA+ Cheap Second Point theory, GPU kernel architecture, batch Montgomery inversion, PTX inline assembly. The vast majority of the code and all core algorithmic innovations are his work.
+- **[RetiredCoder (RC)](https://github.com/RetiredC)** — Original RCKangaroo, SOTA method, GPU kernel architecture, batch Montgomery inversion, PTX inline assembly. The vast majority of the code and all core algorithmic innovations are his work.
 - **[JeanLucPons](https://github.com/JeanLucPons)** — Foundational Kangaroo/VanitySearch/BSGS implementations that inspired the ecosystem.
-- **PSC** — 3x endomorphism, ALL-TAME mode, XDP, ultra-compact DP format, async BSGS resolver, table freeze, checkpoint system, dual hash table, and various integrations.
+- **kTimesG** — Critical feedback on endomorphism/cheap point/XDP that led to the v57 cleanup.
+- **PSC** — ALL-TAME mode, ultra-compact 16-byte DP format, async BSGS resolver, table freeze, checkpoint system, dual hash table, and various integrations.
 
 ## License
 

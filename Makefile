@@ -10,7 +10,6 @@
 #   make                          # Default build (recommended settings)
 #   make GPU_ARCH="-gencode=arch=compute_89,code=sm_89"   # For RTX 4090
 #   make V45_TABLE_BITS=33        # Larger table (128GB+ RAM systems)
-#   make USE_CHEAP_POINT=0        # Disable SOTA+ cheap second point
 #
 
 CUDA_HOME = /usr/local/cuda
@@ -34,9 +33,6 @@ V45_TABLE_BITS ?= 33
 V45_PNT_GROUP_CNT ?= 24
 V45_STEP_CNT ?= 1000
 
-# SOTA+ Cheap Second Point (observes P-J for free during P+J computation)
-USE_CHEAP_POINT ?= 1
-
 V46_DEFS = -DV46_ENABLE=$(V46_ENABLE) \
            -DV46_EXPLORER_PCT=$(V46_EXPLORER_PCT) \
            -DV46_EXPLORER_SHIFT=$(V46_EXPLORER_SHIFT)
@@ -46,9 +42,7 @@ V45_DEFS = -DV45_OCCUPANCY=$(V45_OCCUPANCY) \
            -DV45_PNT_GROUP_CNT=$(V45_PNT_GROUP_CNT) \
            -DV45_STEP_CNT=$(V45_STEP_CNT)
 
-V54_DEFS = -DUSE_CHEAP_POINT=$(USE_CHEAP_POINT)
-
-ALL_DEFS = $(V46_DEFS) $(V45_DEFS) $(V54_DEFS)
+ALL_DEFS = $(V46_DEFS) $(V45_DEFS)
 
 NVCC_FLAGS = -O3 $(GPU_ARCH) $(ALL_DEFS) -Xcompiler -O3,-march=native,-pthread --ptxas-options=-v
 CC_FLAGS = -O3 -march=native -pthread $(ALL_DEFS)
@@ -65,7 +59,7 @@ $(TARGET): $(OBJS)
 	$(NVCC) $(NVCC_FLAGS) -o $@ $(OBJS) $(LIBS)
 	@echo ""
 	@echo "=== Build complete: $(TARGET) ==="
-	@echo "  CHEAP_POINT=$(USE_CHEAP_POINT)  TABLE_BITS=$(V45_TABLE_BITS)  OCCUPANCY=$(V45_OCCUPANCY)"
+	@echo "  TABLE_BITS=$(V45_TABLE_BITS)  OCCUPANCY=$(V45_OCCUPANCY)"
 	@echo ""
 
 RCKangaroo_hunt_v2.o: RCKangaroo_hunt_v2.cpp defs.h utils.h GpuKang.h TameStore.h

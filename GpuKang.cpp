@@ -75,9 +75,9 @@ bool RCGpuKang::Prepare(EcPoint _PntToSolve, int _Range, int _DP, EcJMP* _EcJump
 	Kparams.KernelC_LDS_Size = 96 * JMP_CNT;
 	Kparams.IsGenMode = gGenMode;
 	Kparams.AllWildsMode = false;  // Initialize to false, set true during HUNT
-	Kparams.GpuBloom = nullptr;    // Initialize GPU Bloom as null
-	Kparams.GpuBloomSize = 0;
-	Kparams.UseGpuBloom = false;
+	
+	
+	
 
 //allocate gpu mem
 	u64 size;
@@ -280,7 +280,7 @@ bool RCGpuKang::Prepare(EcPoint _PntToSolve, int _Range, int _DP, EcJMP* _EcJump
 
 void RCGpuKang::Release()
 {
-	FreeGpuBloom();  // Free GPU Bloom if allocated
+	
 	free(RndPnts);
 	free(DPs_out);
 	cudaFree(Kparams.LoopedKangs);
@@ -784,94 +784,4 @@ bool RCGpuKang::ReinitForHunt()
 	return true;
 }
 
-// ============================================================================
-// GPU-SIDE BLOOM FILTER FUNCTIONS
-// ============================================================================
 
-bool RCGpuKang::AllocateGpuBloom(size_t bloom_size_bytes)
-{
-	cudaError_t err = cudaSetDevice(CudaIndex);
-	if (err != cudaSuccess)
-	{
-		printf("GPU %d: cudaSetDevice failed for Bloom allocation\n", CudaIndex);
-		return false;
-	}
-	
-	// Free existing if any
-	if (Kparams.GpuBloom != nullptr)
-	{
-		cudaFree(Kparams.GpuBloom);
-		Kparams.GpuBloom = nullptr;
-	}
-	
-	err = cudaMalloc((void**)&Kparams.GpuBloom, bloom_size_bytes);
-	if (err != cudaSuccess)
-	{
-		printf("GPU %d: Failed to allocate GPU Bloom (%zu MB): %s\n", 
-		       CudaIndex, bloom_size_bytes / (1024*1024), cudaGetErrorString(err));
-		return false;
-	}
-	
-	// Initialize to zero
-	cudaMemset(Kparams.GpuBloom, 0, bloom_size_bytes);
-	
-	// Set size in bits
-	Kparams.GpuBloomSize = bloom_size_bytes * 8;
-	Kparams.UseGpuBloom = false;  // Not enabled yet
-	
-	printf("GPU %d: Allocated GPU Bloom filter (%zu MB)\n", 
-	       CudaIndex, bloom_size_bytes / (1024*1024));
-	
-	return true;
-}
-
-bool RCGpuKang::CopyBloomToGpu(const u8* cpu_bloom, size_t bloom_size_bytes)
-{
-	if (Kparams.GpuBloom == nullptr)
-	{
-		printf("GPU %d: GpuBloom not allocated!\n", CudaIndex);
-		return false;
-	}
-	
-	cudaError_t err = cudaSetDevice(CudaIndex);
-	if (err != cudaSuccess)
-		return false;
-	
-	printf("GPU %d: Copying Bloom filter to GPU (%zu MB)...\n", 
-	       CudaIndex, bloom_size_bytes / (1024*1024));
-	
-	err = cudaMemcpy(Kparams.GpuBloom, cpu_bloom, bloom_size_bytes, cudaMemcpyHostToDevice);
-	if (err != cudaSuccess)
-	{
-		printf("GPU %d: Failed to copy Bloom to GPU: %s\n", CudaIndex, cudaGetErrorString(err));
-		return false;
-	}
-	
-	printf("GPU %d: Bloom filter copied to GPU successfully!\n", CudaIndex);
-	return true;
-}
-
-void RCGpuKang::EnableGpuBloom(bool enable)
-{
-	Kparams.UseGpuBloom = enable;
-	if (enable && Kparams.GpuBloom != nullptr)
-	{
-		printf("GPU %d: GPU-side Bloom filtering ENABLED\n", CudaIndex);
-	}
-	else if (!enable)
-	{
-		printf("GPU %d: GPU-side Bloom filtering DISABLED\n", CudaIndex);
-	}
-}
-
-void RCGpuKang::FreeGpuBloom()
-{
-	if (Kparams.GpuBloom != nullptr)
-	{
-		cudaSetDevice(CudaIndex);
-		cudaFree(Kparams.GpuBloom);
-		Kparams.GpuBloom = nullptr;
-		Kparams.UseGpuBloom = false;
-		printf("GPU %d: GPU Bloom filter freed\n", CudaIndex);
-	}
-}
