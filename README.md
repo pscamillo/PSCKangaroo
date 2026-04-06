@@ -214,17 +214,17 @@ The **SOTA method** (by RetiredCoder) uses equivalence classes and the negation 
 
 ## Changelog
 
-### v56C (current)
-- Ultra-compact 16-byte DP entries (+56% RAM capacity)
-- Async BSGS resolver (4 threads, queue depth 4096, precomputed baby table)
-- Checkpoint format RCKDT5C
-
-### v57 (kTimesG cleanup)
+### v57 (current — kTimesG cleanup)
 - Removed GPU endomorphism canonical form (doesn't help below 254-bit ranges)
 - Removed cheap second point P−J (DPs never converge — dead weight)
 - Removed XDP extended DP check (equivalent to lowering DP parameter)
 - Removed GPU-side Bloom filter
 - Kernel now uses original DP check method
+
+### v56C
+- Ultra-compact 16-byte DP entries (+56% RAM capacity)
+- Async BSGS resolver (4 threads, queue depth 4096, precomputed baby table)
+- Checkpoint format RCKDT5C
 
 ### v55
 - Endomorphism constants BETA2, LAMBDA, LAMBDA2 (later removed in v57)
