@@ -162,7 +162,6 @@ Auto-checkpoint is enabled by default (every 4 hours). To disable: `-checkpoint 
 | `-loadwild <f>` | Load checkpoint and resume | — |
 | `-savedps <f>` | Save evicted DPs to file | — |
 | `-waveinterval N` | Minutes between WILD wave renewals (0 = off) | 0 |
-| `-resonant 0/1` | Resonant WILD spawning | 0 |
 | `-rotation 0/1` | Table freeze (0) or rotation (1) | 0 |
 
 ## Performance

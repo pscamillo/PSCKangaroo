@@ -104,44 +104,10 @@ extern EcInt gStart;         // v39.4.1: Forward declaration for WILD-WILD resol
 extern EcInt g_N;            // v55: For NormDistForLambda
 bool Collision_SOTA_Endo(EcPoint& pnt, EcInt t, int TameType, int endo_t, EcInt w, int WildType, int endo_w);
 
-// v52 FIX: CPU-side canonical X comparison for endomorphism-aware W-W verification
-// Beta constants for secp256k1: beta^3 = 1 mod p
-static EcInt g_BetaCPU, g_Beta2CPU;
-static bool g_BetaInit = false;
-
-static void InitBetaCPU() {
-    if (g_BetaInit) return;
-    memset(&g_BetaCPU, 0, sizeof(EcInt));
-    g_BetaCPU.data[0] = 0xC1396C28719501EEull;
-    g_BetaCPU.data[1] = 0x9CF0497512F58995ull;
-    g_BetaCPU.data[2] = 0x6E64479EAC3434E9ull;
-    g_BetaCPU.data[3] = 0x7AE96A2B657C0710ull;
-    memset(&g_Beta2CPU, 0, sizeof(EcInt));
-    // v55 FIX: BETA2 was wrong! Corrected to actual beta^2 mod p
-    g_Beta2CPU.data[0] = 0x3EC693D68E6AFA40ull;
-    g_Beta2CPU.data[1] = 0x630FB68AED0A766Aull;
-    g_Beta2CPU.data[2] = 0x919BB86153CBCB16ull;
-    g_Beta2CPU.data[3] = 0x851695D49A83F8EFull;
-    g_BetaInit = true;
-}
-
-// Compare canonical X: check if x1 and x2 are in the same beta-orbit
-// i.e., x1 == beta^i * x2 for some i in {0, 1, 2}
+// v52 FIX: CPU-side X comparison for W-W collision verification
+// With endomorphism disabled (v57), this is a simple equality check.
 static bool CanonicalXMatch(EcInt& x1, EcInt& x2) {
-    // Fast path: raw X match (same endo variant, ~1/3 of collisions)
-    if (x1.IsEqual(x2)) return true;
-    
-    InitBetaCPU();
-    
-    // Check x1 == beta * x2
-    EcInt bx2 = g_BetaCPU; bx2.MulModP(x2);
-    if (x1.IsEqual(bx2)) return true;
-    
-    // Check x1 == beta² * x2
-    EcInt b2x2 = g_Beta2CPU; b2x2.MulModP(x2);
-    if (x1.IsEqual(b2x2)) return true;
-    
-    return false;
+    return x1.IsEqual(x2);
 }
 
 // Statistics (atomic for thread safety)
@@ -794,8 +760,7 @@ u64 gLastWaveTime = 0;                 // Timestamp of last wave launch
 // Configurable kangaroo count
 int gGroupCnt = 24;                    // Groups per block (default 24, can be 8-256)
 
-// v34: Resonant WILD spawning
-bool gResonantSpawn = false;           // Use TAME-based resonant spawning (default: off)
+
 
 // v37: WILD-WILD collision support
 bool gWildWildEnabled = true;          // Enable WILD-WILD collision detection (default: on)
@@ -965,7 +930,13 @@ void BSGSConsumerThread() {
                 printf(" (type=%d, endo=%d)\r\n", candidate.Type2, candidate.endo_2);
                 printf("================================================================================\r\n");
                 fflush(stdout);
+            } else {
+                // BSGS found a key but outside valid range — count as FP
+                gFalsePositives.fetch_add(1, std::memory_order_relaxed);
             }
+        } else {
+            // BSGS failed to resolve — hash collision, count as FP
+            gFalsePositives.fetch_add(1, std::memory_order_relaxed);
         }
         gBSGSProcessed.fetch_add(1, std::memory_order_relaxed);
     }
@@ -1860,11 +1831,6 @@ bool SolvePoint(EcPoint PntToSolve, int Range, int DP, EcInt* pk_res)
             GpuKangs[i]->Failed = true;
             printf("GPU %d Prepare failed\r\n", GpuKangs[i]->CudaIndex);
         }
-        else
-        {
-            // v34: Configure resonant spawning
-            GpuKangs[i]->SetResonantSpawn(gResonantSpawn);
-        }
 
     u64 tm0 = GetTickCount64();
     
@@ -1875,11 +1841,6 @@ bool SolvePoint(EcPoint PntToSolve, int Range, int DP, EcInt* pk_res)
         // Initialize GPUs in HUNT mode from the start
         gGenMode = false;
         gHuntStartTime = GetTickCount64();  // Set hunt start time for stats
-        
-        // CRITICAL: Disable resonant spawning in ALL-WILD mode (no TAMEs to sample from!)
-        for (int i = 0; i < GpuCnt; i++) {
-            GpuKangs[i]->SetResonantSpawn(false);
-        }
         
         for (int i = 0; i < GpuCnt; i++) {
             if (!GpuKangs[i]->ReinitForHunt()) {
@@ -1907,11 +1868,6 @@ bool SolvePoint(EcPoint PntToSolve, int Range, int DP, EcInt* pk_res)
         
     } else {
         printf("GPUs started in TRAP mode (filling table[0] with real TAMEs)...\r\n");
-        if (gResonantSpawn) {
-            printf("Resonant WILD spawning: ENABLED (using TAME distance statistics)\r\n");
-        } else {
-            printf("Resonant WILD spawning: DISABLED (random spawning)\r\n");
-        }
         
         // Start worker threads for lock-free parallel processing
         StartWorkerThreads();
@@ -2225,12 +2181,6 @@ bool ParseCommandLine(int argc, char* argv[])
                 return false;
             }
             gGroupCnt = val;
-        }
-        else if (strcmp(argument, "-resonant") == 0)
-        {
-            int val = atoi(argv[ci]);
-            ci++;
-            gResonantSpawn = (val != 0);
         }
         else if (strcmp(argument, "-wildwild") == 0)
         {

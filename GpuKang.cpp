@@ -17,7 +17,7 @@ void CallGpuKernelGen(TKparams Kparams);
 void CallGpuKernelABC(TKparams Kparams);
 void AddPointsToList(u32* data, int cnt, u64 ops_cnt);
 extern bool gGenMode; //tames generation mode
-extern TameStore gTameStore;  // For resonant WILD generation
+extern TameStore gTameStore;
 
 int RCGpuKang::CalcKangCnt()
 {
@@ -49,7 +49,6 @@ bool RCGpuKang::Prepare(EcPoint _PntToSolve, int _Range, int _DP, EcJMP* _EcJump
 	StopFlag = false;
 	Failed = false;
 	WaveNumber = 0;  // Initialize wave counter for smart WILD generation
-	UseResonantSpawn = true;  // v34: Enable resonant spawning by default
 	RndPnts = nullptr;  // v38: Initialize to nullptr for ALL-WILD mode check
 	u64 total_mem = 0;
 	memset(dbg, 0, sizeof(dbg));
@@ -338,145 +337,6 @@ void RCGpuKang::GenerateSmartWildDistances()
 	}
 }
 
-// ============================================================================
-// RESONANT WILD GENERATION - v35 Experimental
-// Uses TAME distance statistics to spawn WILDs in "resonant" positions
-// ============================================================================
-
-// ============================================================================
-// RESSONÂNCIA MULTI-BANDA V35 (CORRIGIDA & VACINADA)
-// Estratégia Otimizada para Ranges Gigantes (ex: 135 bits)
-// ============================================================================
-
-void RCGpuKang::GenerateResonantWildDistances()
-{
-	u64 tame_count = gTameStore.GetTameCount();
-	
-	// 1. Safety check: if insufficient data, use default random.
-	if (tame_count < 1000) {
-		GenerateSmartWildDistances();
-		return;
-	}
-	
-	// 2. Coleta de Amostras Reais dos TAMEs
-	const int NUM_SAMPLES = 256;
-	u8 tame_samples[NUM_SAMPLES * 24];
-	int num_samples = gTameStore.SampleTameDistances(tame_samples, NUM_SAMPLES);
-	
-	if (num_samples == 0) {
-		GenerateSmartWildDistances();
-		return;
-	}
-
-	// 3. Análise da Profundidade Média
-	int avg_bits = gTameStore.GetAverageDistanceBits();
-	
-	// Se a média for inconsistente com o Range, ajusta ou reseta
-	if (avg_bits < 10) avg_bits = 10;
-	if (avg_bits > Range) avg_bits = Range - 1;
-
-	printf("Multi-Band Resonance: Avg TAME depth ~2^%d bits. Deploying tactics with Anti-Clone Vaccine...\n", avg_bits);
-
-	// 4. Geração dos Cangurus
-	for (int i = 0; i < KangCnt; i++)
-	{
-		EcInt d;
-		
-		// Escolhe uma amostra de TAME aleatória como base
-		int sample_idx = rand() % num_samples;
-		u8* ref_dist = tame_samples + sample_idx * 24;
-		
-		// Carrega a distância base (copia 24 bytes)
-		memcpy(d.data, ref_dist, 24);
-		
-		// Limpeza de bits superiores (segurança para não exceder a memória da estrutura)
-		int words = (Range + 63) / 64;
-		for(int k=words; k<4; k++) d.data[k] = 0;
-
-		// --- ESTRATÉGIA MULTI-BANDA (Tactical Deployment) ---
-		// Divide os cangurus em grupos para cobrir diferentes áreas de busca
-		
-		int tactic = i % 10; // Divide em 10 fatias (0 a 9)
-		
-		if (tactic < 2) { 
-			// TÁTICA 1: "Curto Alcance" (20% dos cangurus)
-			// Procura chaves que estão "antes" da média dos TAMEs.
-			// Divide a distância por 2, 4, 8 ou 16 (Shift Right)
-			int shift = 1 + (rand() % 4);
-			d.ShiftRight(shift);
-		}
-		else if (tactic < 8) {
-			// TÁTICA 2: "Ressonância Padrão" (60% dos cangurus)
-			// Procura na mesma região dos TAMEs, com variação (Jitter).
-			
-			EcInt jitter;
-			// O Jitter deve ser proporcional ao tamanho do Range para ser útil
-			// Para Range 135, um jitter de ~120 bits é bom.
-			int jitter_bits = (avg_bits > 10) ? avg_bits - 4 : 5;
-			jitter.RndBits(jitter_bits); 
-			
-			// Aplica o ruído (soma ou subtrai)
-			if (rand() & 1) d.Add(jitter);
-			else {
-				if (jitter.IsLessThanU(d)) d.Sub(jitter);
-				else d.Add(jitter); // Se não der pra subtrair, soma
-			}
-		}
-		else {
-			// TÁTICA 3: "Deep Dive" / Mergulho Profundo (20% dos cangurus)
-			// Assume que a chave está MUITO além de onde os TAMEs pararam.
-			// Multiplica a distância ou adiciona um offset gigante.
-			
-			// Tenta multiplicar a distância (Shift Left)
-			int shift = 1 + (rand() % 3); // x2, x4, ou x8
-			
-			// Verifica se o shift não vai estourar o Range total
-			EcInt limit_check = d;
-			limit_check.ShiftLeft(shift);
-			
-			EcInt max_range_check;
-			max_range_check.Set(1);
-			max_range_check.ShiftLeft(Range - 1);
-			
-			if (limit_check.IsLessThanU(max_range_check)) {
-				d.ShiftLeft(shift);
-			} else {
-				// Se shift for estourar, apenas adiciona um jitter grande
-				EcInt deep_jitter;
-				deep_jitter.RndBits(avg_bits);
-				d.Add(deep_jitter);
-			}
-		}
-
-		// --- VACINA ANTI-CLONE & FINALIZAÇÃO ---
-		
-		// 1. A VACINA: Força a inversão do bit 12.
-		// This mathematically ensures Dist_Wild != original Dist_Tame.
-		// Valor 4096 (2^12) é pequeno o suficiente para não estragar a ressonância,
-		// mas grande o suficiente para ser um ponto distinto.
-		d.data[0] ^= (1ULL << (DP + 4));
-
-		// 2. Garante paridade (Obrigatório para o algoritmo Kangaroo: distância deve ser par)
-		d.data[0] &= 0xFFFFFFFFFFFFFFFE;
-		
-		// 3. Bounds check (Wrap Around)
-		// Se a distância gerada for maior que o Range do puzzle, fazemos o "módulo"
-		// ou regeramos aleatoriamente para não desperdiçar o canguru.
-		EcInt max_dist;
-		max_dist.Set(1);
-		max_dist.ShiftLeft(Range); 
-		
-		if (max_dist.IsLessThanU(d) || d.IsEqual(max_dist)) {
-			// Fallback seguro: Gera aleatório puro dentro do range
-			d.RndBits(Range - 1);
-			d.data[0] &= 0xFFFFFFFFFFFFFFFE;
-		}
-		
-		// Copia para o buffer que será enviado à GPU
-		memcpy(RndPnts[i].priv, d.data, 24);
-	}
-}
-
 bool RCGpuKang::Start()
 {
 	if (Failed)
@@ -741,12 +601,7 @@ bool RCGpuKang::ReinitForHunt()
 	WaveNumber++;
 	
 	// Generate distances for ALL kangaroos
-	// v34: Use resonant spawning if enabled
-	if (UseResonantSpawn) {
-		GenerateResonantWildDistances();
-	} else {
-		GenerateSmartWildDistances();
-	}
+	GenerateSmartWildDistances();
 	
 	// Prepare PntA/PntB offset for ALL kangaroos (not just 2/3)
 	u8 buf_PntA[64], buf_PntB[64];

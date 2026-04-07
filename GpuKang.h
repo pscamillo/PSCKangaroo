@@ -52,11 +52,9 @@ private:
 	
 	// Smart Wave System
 	u64 WaveNumber;  // Current wave number for systematic coverage
-	bool UseResonantSpawn;  // v34: Use TAME-based resonant spawning
 	
 	void GenerateRndDistances();
 	void GenerateSmartWildDistances();  // Smart wave-based WILD generation
-	void GenerateResonantWildDistances();  // v34: Resonant WILD generation
 	bool Start();
 	void Release();
 #ifdef DEBUG_MODE
@@ -78,7 +76,6 @@ public:
 	void SetGenMode(bool mode);  // Update IsGenMode for TRAP/HUNT transition
 	bool ReinitForHunt();  // Reinitialize kangaroos as WILDs for HUNT phase
 	u64 GetWaveNumber() { return WaveNumber; }
-	void SetResonantSpawn(bool enable) { UseResonantSpawn = enable; }  // v34: Enable resonant spawning
 	
 	u32 dbg[256];
 
