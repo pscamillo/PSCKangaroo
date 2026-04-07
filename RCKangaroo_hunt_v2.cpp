@@ -60,7 +60,10 @@ std::vector<std::thread> gWorkerThreads;
 // Queue has max size — oldest entries evicted (real collisions reappear).
 // v56C-OPT: 8 threads + queue 4096 + precomputed baby table
 // ============================================================================
-#define BSGS_QUEUE_MAX 4096  // Queue depth (was 64 — dropped 99% of candidates!)
+// v57c: Increased from 4096 to 256K — W-W mode generates many candidates
+// that all need BSGS resolution (both distances truncated).
+// With 4096, real collisions were dropped before BSGS could process them.
+#define BSGS_QUEUE_MAX (256 * 1024)
 #define BSGS_NUM_THREADS 4   // Parallel BSGS resolver threads
 
 struct BSGSCandidate {
@@ -477,42 +480,14 @@ void WorkerThread(int thread_id) {
                                 dist_w2 = w_unsigned;
                             }
                             
-                            // v40.1: Verify collision is REAL FIRST (silently skip FPs)
-                            {
-                                EcPoint P1 = ec.MultiplyG(dist_w1);
-                                EcPoint P2 = ec.MultiplyG(dist_w2);
-                                
-                                EcPoint NegHalfRange = Pnt_HalfRange;
-                                NegHalfRange.y.NegModP();
-                                
-                                EcPoint PntA = Ec::AddPoints(gPntToSolve, NegHalfRange);
-                                
-                                P1 = Ec::AddPoints(P1, PntA);
-                                
-                                EcPoint PntB = PntA;
-                                PntB.y.NegModP();
-                                
-                                P2 = Ec::AddPoints(P2, PntB);
-                                
-                                // v52 FIX: Use canonical X comparison (accounts for endomorphism)
-                                // GPU stores DPs by canonical X = min(x, beta*x, beta²*x)
-                                // Two kangaroos at endomorphism-related points have same canonical X
-                                // but different raw X (differ by factor beta or beta²)
-                                bool realCollision = CanonicalXMatch(P1.x, P2.x);
-                                
-                                if (!realCollision) {
-                                    // W-W hash false positive (expected, silenced for clean output)
-                                    gFalsePositives.fetch_add(1, std::memory_order_relaxed);
-                                    gCollisionBeingResolved.store(false);
-                                    continue;
-                                }
-                                
-                                // REAL COLLISION - now print debug info
-                                if(show_debug) printf("\n[DEBUG] *** REAL WILD-WILD COLLISION DETECTED! ***\n");
-                                if(show_debug) printf("[DEBUG] Type1=%d, Type2=%d\n", Type1, Type2);
-                            }
+                            // v57b FIX: With 16-byte compact entries, BOTH distances are truncated
+                            // (32 bits lost each). MultiplyG verification produces wrong points on
+                            // both sides, so CanonicalXMatch always fails → real collisions discarded as FP.
+                            // Skip verification and go straight to formula + BSGS resolution.
                             
-                            // Formula: k = gStart + HalfRange + (dist_w2 - dist_w1) / 2
+                            if(show_debug) printf("\n[DEBUG] W-W collision: Type1=%d, Type2=%d\n", Type1, Type2);
+                            
+                            // Formula: k = HalfRange + (dist_w2 - dist_w1) / 2
                             EcInt diff;
                             diff = dist_w2;
                             diff.Sub(dist_w1);
@@ -534,10 +509,10 @@ void WorkerThread(int thread_id) {
                             if (diffNegative) halfDiff.Neg();
                             halfDiff.ShiftRight(1);
                             
-                            // v39.4 FIX: Formula is k = Start + HalfRange + (w2 - w1)/2
-                            // Must include gStart when -start parameter is used!
-                            localPrivKey = gStart;           // Start with gStart
-                            localPrivKey.Add(Int_HalfRange); // Add HalfRange
+                            // v57c FIX: Formula is k = HalfRange + (w2 - w1)/2
+                            // NO gStart! Same as T-W formulas (which also don't use gStart).
+                            // PntA = (k - HalfRange)*G, so distances are relative to k, not gStart.
+                            localPrivKey = Int_HalfRange;    // k = HalfRange + (w2-w1)/2
                             if (diffNegative) {
                                 localPrivKey.Sub(halfDiff);
                             } else {
@@ -555,35 +530,24 @@ void WorkerThread(int thread_id) {
                             if (P.IsEqual(gPntToSolve)) {
                                 gPrivKey = localPrivKey;
                                 resolved = true;
-                                if(show_debug) printf("[DEBUG] RESOLVED: k = Start + HalfRange %c |w2-w1|/2\n", diffNegative ? '-' : '+');
                             } else {
                                 // Try opposite sign
-                                localPrivKey = gStart;
-                                localPrivKey.Add(Int_HalfRange);
+                                localPrivKey = Int_HalfRange;
                                 if (diffNegative) {
                                     localPrivKey.Add(halfDiff);
                                 } else {
                                     localPrivKey.Sub(halfDiff);
                                 }
                                 
-                                if(show_debug) {
-                                    printf("[DEBUG] Trying k = Start + HalfRange %c halfDiff: ", diffNegative ? '+' : '-');
-                                    for(int j=31; j>=0; j--) printf("%02X", ((u8*)localPrivKey.data)[j]);
-                                    printf("\n");
-                                    fflush(stdout);
-                                }
-                                
                                 P = ec.MultiplyG(localPrivKey);
                                 if (P.IsEqual(gPntToSolve)) {
                                     gPrivKey = localPrivKey;
                                     resolved = true;
-                                    if(show_debug) printf("[DEBUG] RESOLVED: k = Start + HalfRange %c |w2-w1|/2\n", diffNegative ? '+' : '-');
                                 }
                             }
                             
                             // If still not resolved, try swapping WILD1/WILD2 interpretation
                             if (!resolved) {
-                                if(show_debug) printf("[DEBUG] Trying swapped WILD1/WILD2 interpretation...\n");
                                 diff = dist_w1;
                                 diff.Sub(dist_w2);
                                 
@@ -592,8 +556,7 @@ void WorkerThread(int thread_id) {
                                 if (diffNegative) halfDiff.Neg();
                                 halfDiff.ShiftRight(1);
                                 
-                                localPrivKey = gStart;
-                                localPrivKey.Add(Int_HalfRange);
+                                localPrivKey = Int_HalfRange;
                                 if (diffNegative) {
                                     localPrivKey.Sub(halfDiff);
                                 } else {
@@ -605,8 +568,7 @@ void WorkerThread(int thread_id) {
                                     gPrivKey = localPrivKey;
                                     resolved = true;
                                 } else {
-                                    localPrivKey = gStart;
-                                    localPrivKey.Add(Int_HalfRange);
+                                    localPrivKey = Int_HalfRange;
                                     if (diffNegative) {
                                         localPrivKey.Add(halfDiff);
                                     } else {
@@ -1540,6 +1502,17 @@ void ShowStats(u64 tm_start, double exp_ops, double dp_val)
                    gTameStore.GetWild2Count() / 1000000.0,
                    wild_stored / 1000000.0, gTameStore.GetWildTableSize() / 1000000.0, wild_load,
                    freeze_tag);
+        }
+        
+        // BSGS queue stats (critical for W-W mode where all collisions need BSGS)
+        {
+            u64 bsgs_done = gBSGSProcessed.load();
+            u64 bsgs_drop = gBSGSDropped.load();
+            size_t bsgs_pending = gBSGSQueue.size();
+            if (bsgs_done > 0 || bsgs_pending > 0 || bsgs_drop > 0) {
+                printf("  BSGS [%d thr]: %zu pending, %llu processed, %llu dropped\r\n",
+                       BSGS_NUM_THREADS, bsgs_pending, bsgs_done, bsgs_drop);
+            }
         }
         
         // v45: Show savedps disk usage

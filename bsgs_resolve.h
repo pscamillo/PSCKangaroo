@@ -201,7 +201,48 @@ static bool Collision_BSGS(Ec& ec, EcPoint& pntToSolve,
                            EcInt& HalfRange, EcInt& privKeyOut,
                            bool show_debug = false) {
     
-    // Determine if WILD1 or WILD2
+    // =========================================================================
+    // WILD-WILD collision: k = HalfRange + (w2 - w1) / 2
+    // Both distances are truncated, error bounded by ±2^31 → within BSGS range
+    // =========================================================================
+    if (TameType != 0 && WildType != 0) {
+        // Identify WILD1 and WILD2
+        EcInt dist_w1, dist_w2;
+        if (TameType == 1 && WildType == 2) {
+            dist_w1 = t; dist_w2 = w;
+        } else {
+            dist_w1 = w; dist_w2 = t;
+        }
+        
+        // Try both orderings: (w2-w1)/2 and (w1-w2)/2
+        for (int sign = 0; sign < 2; sign++) {
+            EcInt diff;
+            if (sign == 0) { diff = dist_w2; diff.Sub(dist_w1); }
+            else           { diff = dist_w1; diff.Sub(dist_w2); }
+            
+            bool neg = (diff.data[4] >> 63) != 0;
+            EcInt halfDiff = diff;
+            if (neg) halfDiff.Neg();
+            halfDiff.ShiftRight(1);
+            
+            // v57c FIX: k = HalfRange + (w2-w1)/2 — NO gStart!
+            // Same as T-W formulas. PntA = (k-HalfRange)*G, distances are relative to k.
+            EcInt k_approx = HalfRange;
+            if (neg) k_approx.Sub(halfDiff);
+            else     k_approx.Add(halfDiff);
+            
+            EcInt k_found;
+            if (BSGS_ResolveKey(ec, k_approx, pntToSolve, k_found)) {
+                privKeyOut = k_found;
+                return true;
+            }
+        }
+        return false;
+    }
+    
+    // =========================================================================
+    // TAME-WILD collision: original path
+    // =========================================================================
     int wildType = (TameType == 0) ? WildType : TameType;
     bool isWild2 = (wildType == 2);
     
