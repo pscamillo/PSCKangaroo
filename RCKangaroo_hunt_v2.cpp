@@ -1626,7 +1626,19 @@ bool SolvePoint(EcPoint PntToSolve, int Range, int DP, EcInt* pk_res)
     // v38.5: Load checkpoint if specified
     if (gLoadCheckpointFile[0] != 0) {
         if (gTameStore.LoadCheckpoint(gLoadCheckpointFile)) {
-            printf("Checkpoint loaded! Continuing from previous state.\r\n\r\n");
+            // v56D: Show table fill status to help user understand TRAP resume
+            u64 w1_count = gTameStore.GetWild1Count();
+            u64 per_table = gTameStore.GetPerTableSize();
+            double fill_pct = per_table > 0 ? (double)w1_count / per_table * 100.0 : 0.0;
+            printf("Checkpoint loaded! Table[0]: %lluM / %lluM (%.1f%%)\r\n",
+                   (unsigned long long)(w1_count / 1000000),
+                   (unsigned long long)(per_table / 1000000), fill_pct);
+            if (fill_pct < 93.0 && !gAllWildMode) {
+                printf("  TRAP will resume from %.1f%% (need 93%% to switch to HUNT)\r\n", fill_pct);
+            } else if (!gAllWildMode) {
+                printf("  Table already >=93%% — will transition to HUNT within seconds.\r\n");
+            }
+            printf("\r\n");
         } else {
             printf("WARNING: Failed to load checkpoint. Starting fresh.\r\n\r\n");
         }
@@ -1636,7 +1648,7 @@ bool SolvePoint(EcPoint PntToSolve, int Range, int DP, EcInt* pk_res)
     gLastCheckpointTime = time(NULL);
     if (gCheckpointIntervalHours > 0) {
         printf("Auto-checkpoint enabled: Every %d hours to '%s'\r\n", gCheckpointIntervalHours, gCheckpointFile);
-        printf("Press Ctrl+C to save checkpoint and exit safely.\r\n\r\n");
+        printf("Press Ctrl+C to save checkpoint and exit safely (works in TRAP and HUNT).\r\n\r\n");
     }
     
     // v40: Open discarded DPs file if specified
@@ -1994,12 +2006,14 @@ bool SolvePoint(EcPoint PntToSolve, int Range, int DP, EcInt* pk_res)
             }
         }
         
-        // v38.5: Auto-checkpoint (only in HUNT phase, not TRAP)
-        if (gCheckpointIntervalHours > 0 && !gTrapPhase) {
+        // v56D: Auto-checkpoint during BOTH TRAP and HUNT phases
+        // (Previously skipped TRAP, causing loss of hours of tame generation on Ctrl+C)
+        if (gCheckpointIntervalHours > 0) {
             time_t current_time = time(NULL);
             double elapsed_hours = difftime(current_time, gLastCheckpointTime) / 3600.0;
             if (elapsed_hours >= gCheckpointIntervalHours) {
-                printf("\n*** AUTO-CHECKPOINT (every %d hours) ***\n", gCheckpointIntervalHours);
+                printf("\n*** AUTO-CHECKPOINT (every %d hours) [%s phase] ***\n", 
+                       gCheckpointIntervalHours, gTrapPhase ? "TRAP" : "HUNT");
                 if (gTameStore.SaveCheckpoint(gCheckpointFile)) {
                     gLastCheckpointTime = current_time;
                 }
@@ -2019,33 +2033,39 @@ bool SolvePoint(EcPoint PntToSolve, int Range, int DP, EcInt* pk_res)
                 GpuKangs[i]->Stop();
             Sleep(200);  // Let GPU threads wind down
             
-            // v55: Respect -checkpoint 0 (never save, not even on Ctrl+C)
-            if (!gTrapPhase) {
-                // Export RAM tables to savedps BEFORE saving checkpoint
-                if (gDiscardedDPsFile[0] != 0) {
-                    printf("\n*** Exporting RAM to savedps for complete offline cross-check coverage ***\n");
-                    u64 exported = gTameStore.ExportRAMToSavedDPs();
-                    if (exported > 0) {
-                        printf(" %llu entries exported. Total savedps: %.2f GB\n",
-                               (unsigned long long)exported,
-                               (double)gTameStore.GetDiscardedBytes() / (1024.0*1024*1024));
-                    }
-                    gTameStore.CloseDiscardedFile();
+            // v56D: Save checkpoint in BOTH TRAP and HUNT phases
+            // Export RAM tables to savedps (HUNT only — during TRAP, savedps not meaningful)
+            if (!gTrapPhase && gDiscardedDPsFile[0] != 0) {
+                printf("\n*** Exporting RAM to savedps for complete offline cross-check coverage ***\n");
+                u64 exported = gTameStore.ExportRAMToSavedDPs();
+                if (exported > 0) {
+                    printf(" %llu entries exported. Total savedps: %.2f GB\n",
+                           (unsigned long long)exported,
+                           (double)gTameStore.GetDiscardedBytes() / (1024.0*1024*1024));
                 }
-                
-                // v55: Only save checkpoint if -checkpoint > 0
-                if (gCheckpointIntervalHours > 0) {
-                    printf("\nSaving checkpoint before exit...\n");
-                    if (gTameStore.SaveCheckpoint(gCheckpointFile)) {
-                        printf("Checkpoint saved successfully.\n");
-                    } else {
-                        printf("WARNING: Checkpoint save failed.\n");
-                    }
+                gTameStore.CloseDiscardedFile();
+            }
+            
+            // v56D: Save checkpoint if -checkpoint > 0 (works in TRAP and HUNT)
+            if (gCheckpointIntervalHours > 0) {
+                printf("\nSaving checkpoint before exit [%s phase]...\n", 
+                       gTrapPhase ? "TRAP" : "HUNT");
+                if (gTrapPhase) {
+                    u64 tame_count = gTameStore.GetWild1Count();
+                    u64 table_size = gTameStore.GetPerTableSize();
+                    printf("  TAMEs so far: %lluM / %lluM (%.1f%%)\n",
+                           (unsigned long long)(tame_count / 1000000),
+                           (unsigned long long)(table_size / 1000000),
+                           table_size > 0 ? (double)tame_count / table_size * 100.0 : 0.0);
+                    printf("  These will be reloaded on next run (resume TRAP or start HUNT).\n");
+                }
+                if (gTameStore.SaveCheckpoint(gCheckpointFile)) {
+                    printf("Checkpoint saved successfully.\n");
                 } else {
-                    printf("\nExiting cleanly (checkpoint disabled).\n");
+                    printf("WARNING: Checkpoint save failed.\n");
                 }
             } else {
-                printf("\nExiting during TRAP phase.\n");
+                printf("\nExiting cleanly (checkpoint disabled by -checkpoint 0).\n");
             }
             gIsOpsLimit = true;
             printf("Exit completed.\r\n");
