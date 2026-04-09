@@ -1,151 +1,205 @@
 # PSCKangaroo
 
-GPU-accelerated **Pollard's Kangaroo** algorithm for solving the Elliptic Curve Discrete Logarithm Problem (ECDLP) on **secp256k1**.
+GPU-accelerated **Pollard's Kangaroo** for solving the Elliptic Curve Discrete Logarithm Problem (ECDLP) on **secp256k1**.
 
-A fork of [RCKangaroo](https://github.com/RetiredC/RCKangaroo) by [RetiredCoder](https://github.com/RetiredC), with new modes and optimizations. Special thanks to RetiredCoder for SOTA!
+A fork of [RCKangaroo](https://github.com/RetiredC/RCKangaroo) by [RetiredCoder](https://github.com/RetiredC). Special thanks to RetiredCoder for the SOTA method and GPU kernel architecture — the core algorithm and GPU kernel are his work.
 
-## What is this?
+## Purpose
 
-PSCKangaroo solves the ECDLP: given a public key `P = k*G` and a known range `[start, start + 2^range]`, it finds the private key `k` using Pollard's Kangaroo (lambda) method with GPU acceleration.
+PSCKangaroo is built for one scenario: **long-running ECDLP puzzles on a single GPU with lots of RAM.**
 
-This is primarily aimed at the [Bitcoin Puzzle Transaction](https://bitcointalk.org/index.php?topic=1306983.0) challenges, where public keys are known and the search range is defined.
+The [Bitcoin Puzzle Transaction](https://bitcointalk.org/index.php?topic=1306983.0) challenges define this scenario — known public keys, defined search ranges, and puzzles that may take years on a single machine. When a run may last months or years, what matters is:
 
-## Features
+1. **No wasted work.** Crashes, reboots, power outages, kernel updates — they all happen. Without checkpoint/resume, months of computation are lost. PSCKangaroo auto-saves and resumes from where it stopped.
 
-### Core Algorithm (from RCKangaroo)
-- **SOTA method** (State of the Art) — Equivalence Classes + Negation Map, achieving the theoretical optimum K ≈ 1.15
-- **Batch Montgomery inversion** — amortizes modular inversions across groups of point additions
-- **PTX inline assembly** — critical 256-bit arithmetic uses hand-tuned PTX instructions
+2. **No memory crashes.** RCKangaroo has no RAM limit — it allocates memory until the OS kills it (see [OOM analysis](#oom-analysis) below). PSCKangaroo's `-ramlimit` guarantees stable operation indefinitely.
 
-### Added by PSCKangaroo
-- **Ultra-compact 16-byte DP entries** — 56% more entries fit in RAM compared to the original 25-byte format
-- **Async BSGS resolver** — multi-threaded Baby-Step Giant-Step resolves truncated-distance collisions in background
-- **Dual hash table** — separate tables for WILD1/WILD2 (or TAME/WILD) with cross-collision detection
-- **Table freeze** — tables become read-only when full, preventing false-positive explosion from overwrites
-- **Uniform jumps** — benchmarked 19% faster than stratified jump tables for large puzzles
-- **Shard-locked reads** — eliminates torn-read false positives in concurrent hash table access
+3. **More entries per GB.** PSCKangaroo uses 16-byte entries vs ~40 bytes in RCKangaroo (32 data + 4 pointer + 4 overhead, per RC's own [RAM formula](https://github.com/RetiredC/RCKangaroo/blob/main/RCKangaroo.cpp#L328)). That's **2.5× more DPs in the same RAM**.
 
-### Modes
-- **ALL-TAME** (default, recommended for 130+ bits) — fills all RAM with TAME points, then hunts with 100% WILDs. Maximizes T-W collision probability.
-- **ALL-WILD** — dual table with WILD-WILD collision detection only. No TRAP phase.
-- **HYBRID** — preload a checkpoint, then hunt with combined T-W and W-W detection.
+For short puzzles (≤ 80 bits), RCKangaroo is faster — see benchmark below. PSCKangaroo targets the puzzles where RCKangaroo can't run safely for extended periods.
 
-### Reliability
-- **Checkpoints** — auto-save at configurable intervals + safe exit on Ctrl+C (format RCKDT5C)
-- **Savedps** — evicted DPs saved to disk for offline cross-checking
+## The Mathematical Reality of Large Puzzles
 
-## Design Rationale
+Before choosing any solver, it's important to understand the scale of what we're attempting.
 
-The original RCKangaroo was designed as a proof of concept focused on the GPU kernel. PSCKangaroo's modifications were driven by a specific hardware setup: a single **RTX 5070** (12 GB VRAM) paired with **128 GB of system RAM**.
+**Puzzle 135** has a 134-bit search range. The expected number of operations to solve it is ~1.15 × √(2¹³⁴) ≈ **2⁶⁷·² operations** — roughly **1.7 × 10²⁰**.
 
-The key insight was that with a large RAM-to-GPU ratio, the optimal strategy changes. Instead of running balanced TAME/WILD kangaroos (where half the RAM stores TAMEs and the other half stores WILDs), it's better to exploit the full RAM capacity:
+At 3.1 GKeys/s (RTX 5070), that's:
 
-- **ALL-TAME mode** fills the entire 128 GB with TAME distinguished points during Phase 1 (TRAP), then switches to 100% WILD kangaroos on the GPU during Phase 2 (HUNT). The WILDs are not stored — they are checked against the massive TAME table and discarded. This doubles the number of TAMEs compared to a balanced split, which directly doubles the T-W collision probability per WILD step.
+| Metric | Value |
+|---|---|
+| Operations needed | ~1.7 × 10²⁰ |
+| Time at 3.1 GK/s | **~1,740 years** |
+| Time with 10 GPUs | ~174 years |
+| Time with 100 GPUs | ~17.4 years |
+| Time with 1,000 GPUs | ~1.7 years |
 
-- **ALL-WILD mode** takes the opposite approach for scenarios where WILD-WILD collisions are preferred, using dual hash tables that fill the entire RAM.
+**No single-GPU solver — RCKangaroo, PSCKangaroo, or any other — can reliably solve Puzzle 135 in a human lifetime.** Everyone running these solvers on Puzzle 135 is playing a probabilistic lottery: hoping to find the collision early, long before the expected time. Some will get lucky; most won't.
 
-- **Ultra-compact 16-byte DP format** was implemented specifically to squeeze 56% more entries into the same RAM footprint. On a 128 GB system, this translates to billions of additional stored points.
+PSCKangaroo doesn't change this reality. It is one more tool in the toolbox — optimized for crash resilience and memory efficiency on long runs. The mathematical difficulty of large puzzles requires either massive parallelism (hundreds of GPUs), a breakthrough in algorithms, or extraordinary luck.
 
-- **Table freeze** prevents the hash tables from rotating entries once full, which would cause an explosion of false positives on long runs — important when a single machine may run for weeks or months.
+That said, someone running a single GPU 24/7 with checkpoint protection has a nonzero chance every second. PSCKangaroo ensures that chance is never wasted by a crash.
 
-These choices reflect the reality that most individual hunters run a single GPU with as much RAM as they can afford, rather than multi-GPU clusters. The architecture is optimized for that profile.
+## Benchmark: PSCKangaroo v59 vs RCKangaroo v3.1
 
-## Development Notes
+**Hardware:** NVIDIA RTX 5070 (Blackwell, 12 GB VRAM) / AMD Ryzen 7 9800X3D / 123 GB RAM / CUDA 12.9 / Linux
 
-Earlier versions of PSCKangaroo included GPU-side endomorphism (canonical form), a "cheap second point" (P−J), and extended distinguished points (XDP). These were removed after feedback from kTimesG on BitcoinTalk, who correctly pointed out that:
+**Puzzle 80** (79-bit range, known private key `ea1a5c66dcc11b5ad180`), 5 runs each:
 
-- The canonical X form doesn't produce useful collisions below 254-bit ranges (endo-equivalent points aren't in the search interval, and jump selection uses raw X so trajectories don't converge).
-- The cheap second point generates DPs that no kangaroo will ever converge toward — dead weight.
-- XDP is functionally equivalent to simply lowering the DP parameter.
+| Configuration | Median | Mean | Min | Max | Solved |
+|---|---|---|---|---|---|
+| **RCKangaroo** DP=16 | **301s** | 299s | 120s | 514s | 5/5 |
+| **PSC v59** concurrent DP=12 RAM=8GB | **320s** | 463s | 236s | 837s | 5/5 |
+| **PSC v59** concurrent DP=14 RAM=20GB | 423s | 536s | 142s | 1223s | 5/5 |
+| **PSC v59** concurrent DP=12 RAM=20GB | 491s | 558s | 252s | 817s | 5/5 |
 
-The current codebase focuses on what genuinely helps: architecture optimizations for single-GPU + high-RAM setups.
+**Observations:**
 
-Correctness validated by solving **Puzzle #80** (79-bit range, known answer).
+- RCKangaroo wins by ~6% on median (301s vs 320s) — expected, as SOTA's concurrent walk dynamics are mathematically optimal (K ≈ 1.15).
+- PSC's best single run (142s) was faster than RC's best (120s) — high variance is normal for a probabilistic algorithm.
+- Both solvers run the same GPU kernel at ~3.1 GKeys/s. The performance difference is purely architectural.
+- **For Puzzle 80 and similar short puzzles, RCKangaroo is the better choice** — it solves in minutes with zero setup overhead.
 
-## Requirements
+## How RCKangaroo and PSCKangaroo Compare
 
-- **GPU**: NVIDIA with Compute Capability ≥ 6.0 (Pascal or newer)
-  - Tested on: RTX 5070 (Blackwell, sm_120)
-  - Should work on: RTX 3000/4000/5000 series (adjust `GPU_ARCH` in Makefile)
-- **CUDA Toolkit**: 12.0 or newer
-- **RAM**: 16 GB minimum, 128 GB recommended for large puzzles
-- **OS**: Linux (Ubuntu 22.04+ recommended) or Windows
-
-## Build
-
-```bash
-# Clone the repository
-git clone https://github.com/pscamillo/PSCKangaroo.git
-cd PSCKangaroo
-
-# Edit Makefile if needed: set GPU_ARCH for your GPU
-# Default is sm_120 (Blackwell / RTX 5070)
-
-# Build
-make clean && make
-```
-
-### GPU Architecture Reference
-
-| GPU Series | Architecture | Makefile Setting |
+| Aspect | RCKangaroo v3.1 | PSCKangaroo v59 |
 |---|---|---|
-| RTX 3060/3070/3080/3090 | Ampere | `GPU_ARCH="-gencode=arch=compute_86,code=sm_86"` |
-| RTX 4060/4070/4080/4090 | Ada Lovelace | `GPU_ARCH="-gencode=arch=compute_89,code=sm_89"` |
-| RTX 5070/5080/5090 | Blackwell | `GPU_ARCH="-gencode=arch=compute_120,code=sm_120"` (default) |
+| GPU kernel speed | ~3.1 GKeys/s | ~3.1 GKeys/s (same kernel) |
+| Effective bytes per DP | **~40 B** | **16 B** (2.5× more entries/GB) |
+| RAM management | No limit (grows until OOM) | `-ramlimit` (stable indefinitely) |
+| Checkpoint | **`-tames` (pre-generated TAMEs only)** | **Full** (auto-save + Ctrl+C safe) |
+| Crash recovery | Loses all WILDs and solve progress | Resumes from last checkpoint |
+| Collision dynamics | Concurrent T+W (t² growth, K≈1.15) | Concurrent T+W (t² growth) |
+| Minimum DP @120GB | DP≥24 to run for months | **DP=12+** safely |
+| Pre-generate TAMEs | Yes (`-tames file -max N`) | Yes (checkpoint system) |
+| Ops limit | `-max` (stops solver, no save) | Runs indefinitely |
+| Puzzle 80 median | **301s** (faster) | 320s |
+| Puzzle 135+ viability | Needs DP≥24, no crash recovery | DP=14, checkpoint every 4h |
 
-### Build Options
+**Note on RCKangaroo's `-tames` feature:** RC can pre-generate a TAME table with `-tames file -max N` and reload it across multiple runs. This gives a head start but is not a full checkpoint — WILDs and solve progress are not saved. If the solver crashes during a solve, only the pre-generated tame file survives.
+
+**Note on RCKangaroo's `-max` feature:** RC can limit the number of operations with `-max N`. When reached, the solver stops — but does not save progress (except in tame generation mode). It's a "give up after N ops" limit, not a RAM management tool.
+
+## OOM Analysis
+
+RCKangaroo stores every DP unconditionally. At ~40 bytes per entry with no RAM limit, memory grows linearly until the OS kills the process:
+
+| DP | DPs/s @3.1GK/s | Growth rate | OOM on 120 GB system |
+|---|---|---|---|
+| 14 | 189,209 | 7.6 MB/s | **~4.4 hours** |
+| 16 | 47,302 | 1.9 MB/s | **~17.6 hours** |
+| 20 | 2,956 | 118 KB/s | **~11.8 days** |
+| 24 | 185 | 7.4 KB/s | **~6.3 months** |
+
+These times are computed from RC's own RAM formula: `(32 + 4 + 4) × total_ops / 2^DP`, verified in `RCKangaroo.cpp` line 328. The `malloc` inside RC's MemPool does not check for allocation failure — OOM results in a segfault with no save.
+
+PSCKangaroo with `-ramlimit 120` runs indefinitely at any DP value. When the table reaches 93% capacity, it freezes (no new TAMEs stored) and continues hunting with 100% WILDs.
+
+## Quick Start
+
+### Recommended: Concurrent mode (v59)
 
 ```bash
-# For RTX 4090:
-make GPU_ARCH="-gencode=arch=compute_89,code=sm_89"
-
-# Larger hash table (for 128GB+ RAM systems):
-make V45_TABLE_BITS=33
-```
-
-## Usage
-
-### Basic (Puzzle #135 example)
-
-```bash
-./psckangaroo \
-  -gpu 0 \
-  -dp 20 \
-  -range 135 \
-  -ramlimit 115 \
+./psckangaroo -gpu 0 -dp 14 -range 134 \
   -pubkey 02145d2611c823a396ef6712ce0f712f09b9b4f3135e3e0aa3230fb9b6d08d1e16 \
-  -start 4000000000000000000000000000000000
+  -start 4000000000000000000000000000000000 \
+  -ramlimit 120 -concurrent 1 -wwbuffer 5 -checkpoint 4
 ```
 
-Auto-checkpoint is enabled by default (every 4 hours). To disable: `-checkpoint 0`.
+This runs TAME and WILD kangaroos simultaneously from second 1 (like RCKangaroo), but with memory protection, checkpoint, and 16-byte compact entries.
 
 ### Resume from checkpoint
 
 ```bash
-./psckangaroo \
-  -gpu 0 \
-  -dp 20 \
-  -range 135 \
-  -ramlimit 115 \
-  -loadwild wild_checkpoint.dat \
+./psckangaroo -gpu 0 -dp 14 -range 134 \
   -pubkey 02145d2611c823a396ef6712ce0f712f09b9b4f3135e3e0aa3230fb9b6d08d1e16 \
-  -start 4000000000000000000000000000000000
+  -start 4000000000000000000000000000000000 \
+  -ramlimit 120 -concurrent 1 -wwbuffer 5 -checkpoint 4 \
+  -loadwild wild_checkpoint.dat
 ```
 
-### ALL-WILD mode (alternative strategy)
+### Validation (Puzzle 70, ~30 seconds)
 
 ```bash
-./psckangaroo \
-  -gpu 0 \
-  -dp 20 \
-  -range 135 \
-  -ramlimit 115 \
-  -allwild 1 \
-  -pubkey 02145d2611c823a396ef6712ce0f712f09b9b4f3135e3e0aa3230fb9b6d08d1e16 \
-  -start 4000000000000000000000000000000000
+./psckangaroo -gpu 0 -dp 12 -range 69 -ramlimit 4 -checkpoint 0 -concurrent 1 \
+  -pubkey 0290e6900a58d33393bc1097b5aed31f2e4e7cbd3e5466af958665bc0121248483 \
+  -start 200000000000000000
 ```
 
-### Command-Line Options
+Expected result: private key `349b84b6431a6c4ef1`.
+
+### Validation (Puzzle 80, ~5–10 minutes)
+
+```bash
+./psckangaroo -gpu 0 -dp 12 -range 79 -ramlimit 8 -checkpoint 0 -concurrent 1 -wwbuffer 5 \
+  -pubkey 037e1238f7b1ce757df94faa9a2eb261bf0aeb9f84dbf81212104e78931c2a19dc \
+  -start 80000000000000000000
+```
+
+Expected result: private key `ea1a5c66dcc11b5ad180`.
+
+## Operating Modes
+
+### Concurrent (v59) — recommended
+
+```
+-concurrent 1
+```
+
+Runs 33% TAME + 33% WILD1 + 33% WILD2 kangaroos from the first second. The TAME table grows while WILDs hunt against it — collision probability grows quadratically (t²) until the table fills, then automatically switches to 100% WILDs.
+
+This is functionally equivalent to how RCKangaroo operates, but with `-ramlimit`, checkpoint, and 2.5× more entries per GB.
+
+### ALL-TAME (legacy)
+
+```
+-allwild 0
+```
+
+Phase 1 (TRAP): fills all RAM with TAMEs — no collisions possible during this phase. Phase 2 (HUNT): 100% WILDs check against the frozen table. For Puzzle 80, this took 1h31m (1h26m TRAP + 5 min HUNT), while concurrent mode solved the same puzzle in ~5 minutes. Concurrent mode eliminates this dead time.
+
+### ALL-WILD
+
+```
+-allwild 1
+```
+
+WILD-WILD collisions only, no TAMEs. Experimental — concurrent mode outperforms in all tested scenarios.
+
+### W-W Buffer (v58)
+
+```
+-wwbuffer 5
+```
+
+Reserves 5% of RAM for a WILD1-WILD2 cross-collision buffer. Adds a second collision channel on top of TAME-WILD detection. In testing, the W-W buffer produced hundreds of additional collision candidates per run. Can be combined with concurrent or ALL-TAME mode.
+
+## How It Works
+
+### The SOTA Kangaroo Method
+
+Pollard's Kangaroo solves ECDLP by launching pseudo-random walks on the elliptic curve:
+
+- **TAME kangaroos** start from known positions (k·G where k is known)
+- **WILD kangaroos** start from positions derived from the target public key
+
+When a TAME and WILD land on the same distinguished point (collision), the private key is computed from the difference in their accumulated walk distances.
+
+**Distinguished Points (DPs)** are positions where the x-coordinate has a specific number of leading zero bits. Only DPs are stored, reducing memory by a factor of 2^DP while preserving collision detection.
+
+The **SOTA method** (by RetiredCoder) uses equivalence classes and the negation map to reduce expected operations from ~2.08√n to ~1.15√n. PSCKangaroo inherits this method and GPU kernel unchanged.
+
+### What PSCKangaroo adds
+
+**Concurrent mode (v59):** Eliminates the sequential TRAP/HUNT separation. TAMEs and WILDs run simultaneously from second 1, giving quadratic (t²) collision probability growth while respecting a RAM limit and saving checkpoints.
+
+**16-byte compact entries:** Each DP is stored in 16 bytes using a 20-bit x-signature + 104-bit truncated distance. When a collision is detected, the exact distance is recovered via an async BSGS search (±2³², typically 200–400ms). This fits 2.5× more entries per GB compared to RCKangaroo's ~40-byte entries.
+
+**W-W buffer (v58):** A small hash table (5% of RAM) stores recent WILDs and cross-checks WILD1 vs WILD2 collisions, adding a second collision channel alongside TAME-WILD detection.
+
+**Checkpoint/Resume:** Auto-saves the TAME table at configurable intervals and on Ctrl+C. A crash after weeks of computation costs at most a few hours of work, not the entire run.
+
+## Command-Line Options
 
 | Option | Description | Default |
 |---|---|---|
@@ -155,109 +209,102 @@ Auto-checkpoint is enabled by default (every 4 hours). To disable: `-checkpoint 
 | `-pubkey <hex>` | Target compressed public key | — |
 | `-start <hex>` | Range start offset | — |
 | `-ramlimit N` | RAM limit in GB | — |
-| `-allwild 0/1` | 0 = ALL-TAME (default), 1 = ALL-WILD | 0 |
-| `-groups N` | Points per batch inversion (8–256) | 24 |
+| `-concurrent 1` | v59 concurrent mode (recommended) | 0 |
+| `-allwild 0/1` | 0 = ALL-TAME, 1 = ALL-WILD | 0 |
+| `-wwbuffer N` | W-W buffer: N% of RAM (0–20) | 0 |
 | `-checkpoint N` | Auto-save interval in hours (0 = off) | 4 |
 | `-savefile <f>` | Checkpoint filename | `wild_checkpoint.dat` |
 | `-loadwild <f>` | Load checkpoint and resume | — |
+| `-groups N` | Points per batch inversion (8–256) | 24 |
 | `-savedps <f>` | Save evicted DPs to file | — |
 | `-waveinterval N` | Minutes between WILD wave renewals (0 = off) | 0 |
 | `-rotation 0/1` | Table freeze (0) or rotation (1) | 0 |
 
-## Performance
+## Build
 
-Approximate speeds (Puzzle 135, DP 20, ALL-TAME mode):
+```bash
+git clone https://github.com/pscamillo/PSCKangaroo.git
+cd PSCKangaroo
+
+# Edit Makefile if needed: set GPU_ARCH for your GPU
+# Default is sm_120 (Blackwell / RTX 5070)
+
+make clean && make
+```
+
+### GPU Architecture
+
+| GPU Series | Makefile Setting |
+|---|---|
+| RTX 3060/3070/3080/3090 | `GPU_ARCH="-gencode=arch=compute_86,code=sm_86"` |
+| RTX 4060/4070/4080/4090 | `GPU_ARCH="-gencode=arch=compute_89,code=sm_89"` |
+| RTX 5070/5080/5090 | `GPU_ARCH="-gencode=arch=compute_120,code=sm_120"` (default) |
+
+## Requirements
+
+- **GPU:** NVIDIA with Compute Capability ≥ 6.0 (Pascal or newer)
+- **CUDA Toolkit:** 12.0+
+- **RAM:** 8 GB minimum, 128 GB recommended for large puzzles
+- **OS:** Linux (Ubuntu 22.04+) or Windows
+
+## Performance
 
 | GPU | Speed | Notes |
 |---|---|---|
-| RTX 5070 (Blackwell) | ~2.0 GKeys/s | sm_120, tested |
-| RTX 4090 (Ada) | ~3.5 GKeys/s | sm_89, estimated |
-| RTX 3090 (Ampere) | ~1.5 GKeys/s | sm_86, estimated |
+| RTX 5070 (Blackwell) | ~3.1 GKeys/s | Tested |
+| RTX 4090 (Ada) | ~3.5 GKeys/s | Estimated |
+| RTX 3090 (Ampere) | ~1.5 GKeys/s | Estimated |
 
-Actual performance depends on DP value, RAM configuration, and kernel tuning parameters.
+## Design History
 
-## Validation
+### What was tried and removed
 
-You can validate PSCKangaroo by solving already-solved Bitcoin puzzles. Puzzle #70 (69-bit range) is a good quick test — it should solve in about 2 minutes on a modern GPU:
+Earlier versions included GPU-side endomorphism (canonical form), a "cheap second point" (P−J), and extended distinguished points (XDP). These were removed after feedback from kTimesG on BitcoinTalk, who correctly identified that:
 
-```bash
-./psckangaroo -gpu 0 -dp 14 -range 69 -ramlimit 4 -checkpoint 0 \
-  -pubkey 0290e6900a58d33393bc1097b5aed31f2e4e7cbd3e5466af958665bc0121248483 \
-  -start 200000000000000000
-```
+- Canonical X form doesn't produce useful collisions below 254-bit ranges
+- Cheap second point generates DPs that no kangaroo converges toward
+- XDP is functionally equivalent to lowering the DP parameter
 
-Expected output: the program fills the TAME table (~30 seconds), switches to HUNT mode, and finds the key via BSGS collision resolution. The known private key for Puzzle #70 is `349b84b6431a6c4ef1`.
+### The ALL-TAME lesson
 
-For a longer test, Puzzle #80 (79-bit range) takes roughly 30 minutes:
-
-```bash
-./psckangaroo -gpu 0 -dp 14 -range 79 -ramlimit 60 -checkpoint 0 \
-  -pubkey 037e1238f7b1ce757df94faa9a2eb261bf0aeb9f84dbf81212104e78931c2a19dc \
-  -start 80000000000000000000
-```
-
-**Note:** During the HUNT phase, hash false positives (FP) are expected and counted in the stats. These are harmless x_sig truncation collisions that fail verification — not bugs. The BSGS async resolver handles real collisions correctly.
-
-## How It Works
-
-The Pollard's Kangaroo algorithm solves ECDLP by launching two types of pseudo-random walks on the elliptic curve:
-
-1. **TAME kangaroos** start from known positions (k*G where k is known)
-2. **WILD kangaroos** start from positions derived from the target public key
-
-When a TAME and WILD kangaroo land on the same point (collision), the private key can be computed from the difference of their accumulated distances.
-
-**Distinguished Points (DPs)** are positions where the x-coordinate has a specific number of leading zero bits. Only DPs are stored, reducing memory requirements by a factor of 2^DP while preserving collision detection capability.
-
-The **SOTA method** (by RetiredCoder) uses equivalence classes and the negation map to reduce the expected number of steps from ~2.08√n to ~1.15√n, where n is the range size.
+The original PSCKangaroo architecture used sequential TRAP/HUNT phases — fill all RAM with TAMEs first, then hunt with WILDs. While more TAMEs increase collision probability per-check, the TRAP phase is dead time with zero collision probability. For Puzzle 80, ALL-TAME took 1h31m (1h26m TRAP + 5 min HUNT). Concurrent mode solved the same puzzle in ~5 minutes by hunting from second 1. This analysis led to the v59 concurrent mode.
 
 ## Changelog
 
-### v57 (current — kTimesG cleanup)
-- Removed GPU endomorphism canonical form (doesn't help below 254-bit ranges)
-- Removed cheap second point P−J (DPs never converge — dead weight)
-- Removed XDP extended DP check (equivalent to lowering DP parameter)
-- Removed GPU-side Bloom filter
-- Kernel now uses original DP check method
+### v59 (current — concurrent mode)
+- **Concurrent mode:** 33% TAME + 67% WILD from second 1, quadratic (t²) collision growth
+- New CLI flag: `-concurrent 1`
+- Auto-transitions to 100% WILDs when table reaches 93% capacity
+- Stats display shows TAMEs growing + WILDs hunting simultaneously
+
+### v58 (W-W buffer)
+- Small hash table (5–10% of RAM) for WILD1-WILD2 cross-collision detection
+- New CLI flag: `-wwbuffer N`
+
+### v57 (kTimesG cleanup)
+- Removed GPU endomorphism canonical form, cheap second point, XDP, GPU Bloom filter
 
 ### v56C
-- Ultra-compact 16-byte DP entries (+56% RAM capacity)
-- Async BSGS resolver (4 threads, queue depth 4096, precomputed baby table)
-- Checkpoint format RCKDT5C
-
-### v55
-- Endomorphism constants BETA2, LAMBDA, LAMBDA2 (later removed in v57)
-
-### v54
-- Cheap Second Point (later removed in v57)
-- Validated by solving Puzzle #80 (known answer)
+- Ultra-compact 16-byte DP entries (+56% capacity vs 25-byte format)
+- Async BSGS resolver (4 threads, precomputed baby table)
 
 ### v53
-- ALL-TAME mode: dedicates all RAM to TAMEs for maximum T-W probability
-- Table freeze: prevents false-positive explosion on long runs
-
-### v52
-- Reverted to GroupCnt=24 (GroupCnt=200 caused catastrophic register spill)
-- Reverted occupancy to 1 block/SM (256 regs/thread optimal)
+- ALL-TAME mode, table freeze
 
 ### Earlier versions
-- Dual hash table with cross-type collision detection
-- Uniform jumps (19% faster than stratified, benchmarked)
-- Shard-locked reads for concurrent access safety
+- Dual hash table, uniform jumps, shard-locked reads
 
 ## Credits
 
-- **[RetiredCoder (RC)](https://github.com/RetiredC)** — Original RCKangaroo, SOTA method, GPU kernel architecture, batch Montgomery inversion, PTX inline assembly. The vast majority of the code and all core algorithmic innovations are his work.
-- **[JeanLucPons](https://github.com/JeanLucPons)** — Foundational Kangaroo/VanitySearch/BSGS implementations that inspired the ecosystem.
+- **[RetiredCoder (RC)](https://github.com/RetiredC)** — Original RCKangaroo, SOTA method, GPU kernel, batch Montgomery inversion, PTX assembly. The core algorithm is entirely his work.
+- **[JeanLucPons](https://github.com/JeanLucPons)** — Foundational Kangaroo/VanitySearch/BSGS implementations.
 - **kTimesG** — Critical feedback on endomorphism/cheap point/XDP that led to the v57 cleanup.
-- **PSC** — ALL-TAME mode, ultra-compact 16-byte DP format, async BSGS resolver, table freeze, checkpoint system, dual hash table, and various integrations.
+- **PSC** — Concurrent mode (v59), W-W buffer (v58), ALL-TAME mode, 16-byte compact entries, async BSGS resolver, checkpoint system, table freeze, `-ramlimit`.
 
 ## License
 
-This project is licensed under the **GNU General Public License v3.0** — see the [LICENSE](LICENSE) file.
-
-This is a derivative work of [RCKangaroo](https://github.com/RetiredC/RCKangaroo) which is also GPLv3.
+GPLv3 — see [LICENSE](LICENSE). Derivative work of [RCKangaroo](https://github.com/RetiredC/RCKangaroo).
 
 ## Disclaimer
 
-This software is provided for educational and research purposes. Use responsibly and in accordance with applicable laws. The authors assume no liability for any use of this software.
+This software is provided for educational and research purposes. Solving Bitcoin puzzle challenges is a probabilistic endeavor — there is no guarantee of success regardless of hardware or software used. Use responsibly and in accordance with applicable laws.

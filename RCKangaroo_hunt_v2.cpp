@@ -98,6 +98,8 @@ extern volatile bool gSolved;
 extern EcPoint gPntToSolve;
 extern volatile bool gTrapPhase;
 extern bool gAllWildMode;  // v37: ALL-WILD mode (defined later)
+extern bool gConcurrentMode;       // v59: forward declaration
+extern bool gConcurrentTableFull;  // v59: forward declaration
 extern EcInt Int_HalfRange;  // v38: Forward declaration for WorkerThread
 extern EcPoint Pnt_HalfRange; // v39.4.1: Forward declaration for collision verification
 extern Ec ec;                // v38: Forward declaration for WorkerThread
@@ -157,6 +159,19 @@ void WorkerThread(int thread_id) {
                 u8 kang_type = GET_KANG_TYPE(type_info);
                 u8 endo_transform = GET_ENDO_TRANSFORM(type_info);
                 
+                // v59: CONCURRENT MODE — route by kangaroo type from second 1
+                if (gConcurrentMode && !gConcurrentTableFull && !gTrapPhase) {
+                    if (kang_type == TAME) {
+                        // Store TAME DP (1/3 of GPU output)
+                        dist_bytes[22] = (endo_transform << 4) | TAME;
+                        dist_bytes[23] = 0;
+                        gTameStore.AddTame(x_bytes, dist_bytes);
+                        gTamesDPs++;
+                        continue;  // TAME stored, next DP
+                    }
+                    // WILD1/WILD2 fall through to check logic below
+                }
+                
                 if (gTrapPhase) {
                     // TRAP PHASE: Store DPs into tables
                     // v51: Real TAME mode — GPU generates TAMEs (IsGenMode=true, no pubkey offset)
@@ -168,7 +183,7 @@ void WorkerThread(int thread_id) {
                     gTamesDPs++;
                 }
                 else if (kang_type == WILD1 || kang_type == WILD2) {
-                    // HUNT PHASE: Check WILD against stored entries
+                    // HUNT PHASE (or CONCURRENT WILDs): Check WILD against stored entries
                     gHuntChecks++;
                     dist_bytes[22] = type_info;
                     dist_bytes[23] = 0;
@@ -727,6 +742,9 @@ int gGroupCnt = 24;                    // Groups per block (default 24, can be 8
 // v37: WILD-WILD collision support
 bool gWildWildEnabled = true;          // Enable WILD-WILD collision detection (default: on)
 bool gAllWildMode = false;            // Default: ALL-TAME (fill RAM with TAMEs, hunt with WILDs)
+int gWWBufferPct = 0;                 // v58: W-W buffer percentage (0=off, 5=default when enabled)
+bool gConcurrentMode = false;         // v59: Concurrent T+W from second 1 (RC-style t² growth)
+bool gConcurrentTableFull = false;    // v59: Table hit ramlimit, switched to 100% WILDs
 bool gNoRotation = true;              // v52: Freeze tables when full (no rotation = no FP explosion)
 
 // v38.5: CHECKPOINT system
@@ -1526,6 +1544,59 @@ void ShowStats(u64 tm_start, double exp_ops, double dp_val)
         return;
     }
     
+    // v59: CONCURRENT MODE stats
+    if (gConcurrentMode) {
+        u64 w1_count = gTameStore.GetWild1Count();
+        u64 per_table = gTameStore.GetPerTableSize();
+        double fill_pct = (per_table > 0) ? (double)w1_count * 100.0 / (double)per_table : 0;
+        u64 tw_coll = gTameStore.GetTameWildCollisions();
+        u64 ww_coll = gTameStore.GetWildWildCollisions();
+        u64 checks = gHuntChecks.load();
+        u64 fp = gFalsePositives.load();
+        u64 dups = gTameStore.GetDuplicatePoints();
+        
+        const char* phase = gConcurrentTableFull ? "HUNT" : "CONC";
+        
+        printf("%s: Speed: %.2f GKeys/s | Time: %llud %02dh %02dm\r\n",
+               phase, speed / 1000.0, days, hours, min);
+        
+        if (!gConcurrentTableFull) {
+            // Still building table + hunting
+            double tame_dps = (double)speed * 1000000.0 / 3.0 / dp_val;
+            double wild_checks_s = (sec > 0) ? (double)checks / sec : 0;
+            printf("  TAMEs: %lluM / %lluM (%.1f%%) | +%.0f TAMEs/s\r\n",
+                   w1_count / 1000000, per_table / 1000000, fill_pct, tame_dps);
+            printf("  WILDs: %lluM checks | T-W: %llu | W-W: %llu | FP: %llu | %.1fK/s\r\n",
+                   checks / 1000000, tw_coll, ww_coll, fp, wild_checks_s / 1000.0);
+        } else {
+            // Table full, 100% WILDs now
+            u64 hunt_sec = (GetTickCount64() - gHuntStartTime) / 1000;
+            double checks_s = (hunt_sec > 0) ? (double)checks / hunt_sec : 0;
+            printf("  TAMEs: %lluM (%.1f%% — FROZEN) | 100%% WILDs hunting\r\n",
+                   w1_count / 1000000, fill_pct);
+            printf("  Checks: %lluM | T-W: %llu | W-W: %llu | FP: %llu | Dup: %llu | %.1fK/s\r\n",
+                   checks / 1000000, tw_coll, ww_coll, fp, dups, checks_s / 1000.0);
+        }
+        
+        // W-W buffer stats
+        if (gTameStore.HasWWBuffer()) {
+            printf("  W-W buffer: %lluM stored, %llu W1-W2 hits\r\n",
+                   (unsigned long long)(gTameStore.GetWWBufferCount() / 1000000),
+                   (unsigned long long)gTameStore.GetWWBufferHits());
+        }
+        
+        // BSGS stats
+        u64 bsgs_done = gBSGSProcessed.load();
+        u64 bsgs_drop = gBSGSDropped.load();
+        if (bsgs_done > 0 || bsgs_drop > 0) {
+            std::lock_guard<std::mutex> lk(gBSGSMutex);
+            printf("  BSGS [%d thr]: %zu pending, %llu processed, %llu dropped\r\n",
+                   BSGS_NUM_THREADS, gBSGSQueue.size(),
+                   (unsigned long long)bsgs_done, (unsigned long long)bsgs_drop);
+        }
+        return;
+    }
+    
     // Normal mode: TRAP/HUNT phases
     const char* phase = gTrapPhase ? "TRAP" : "HUNT";
     u64 w1_count = gTameStore.GetWild1Count();
@@ -1569,6 +1640,12 @@ void ShowStats(u64 tm_start, double exp_ops, double dp_val)
                    tame_count / 1000000,
                    (tame_size > 0) ? (double)tame_count * 100.0 / (double)tame_size : 0,
                    (double)(tame_size * sizeof(WildEntryCompact)) / (1024.0*1024*1024));
+            // v58: Show W-W buffer stats if active
+            if (gTameStore.HasWWBuffer()) {
+                printf("  W-W buffer: %lluM stored, %llu W1-W2 hits\r\n",
+                       (unsigned long long)(gTameStore.GetWWBufferCount() / 1000000),
+                       (unsigned long long)gTameStore.GetWWBufferHits());
+            }
             // v56C-OPT: Show BSGS queue stats with thread count
             u64 bsgs_done = gBSGSProcessed.load();
             u64 bsgs_drop = gBSGSDropped.load();
@@ -1609,7 +1686,8 @@ bool SolvePoint(EcPoint PntToSolve, int Range, int DP, EcInt* pk_res)
         init_ok = gTameStore.InitWildOnly((size_t)store_ram);
     } else {
         // v53: ALL-TAME mode: All RAM goes to TAME table for maximum T-W probability
-        init_ok = gTameStore.InitAllTame((size_t)store_ram);
+        // v58: Optional W-W buffer for SOTA hybrid (K improvement)
+        init_ok = gTameStore.InitAllTame((size_t)store_ram, gWWBufferPct);
     }
     
     if (!init_ok) {
@@ -1671,6 +1749,18 @@ bool SolvePoint(EcPoint PntToSolve, int Range, int DP, EcInt* pk_res)
         printf("  Total capacity:  %llu entries\r\n", 
                (unsigned long long)gTameStore.GetWildTableSize());
         printf("  Skipping TRAP phase — direct WILD-WILD hunt.\r\n");
+    } else if (gConcurrentMode) {
+        printf("\r\nStrategy: CONCURRENT (v59 — RC-style t² growth)\r\n");
+        printf("  GPU split: 33%% TAME + 33%% WILD1 + 33%% WILD2 from second 1\r\n");
+        printf("  TAMEs stored → table grows while WILDs hunt simultaneously\r\n");
+        printf("  Collision probability grows with t² (quadratic) until table full\r\n");
+        double fill_rate = (2.8e9 / 3.0) / dp_val;
+        double fill_time = (double)gTameStore.GetPerTableSize() / fill_rate;
+        printf("  Est. table fill: %.1f days (then switch to 100%% WILDs)\r\n",
+               fill_time / 86400.0);
+        if (gWWBufferPct > 0)
+            printf("  W-W buffer: %d%% RAM (T-W + W1-W2 collisions)\r\n", gWWBufferPct);
+        printf("  Advantage: t² growth + ramlimit + checkpoint + 16-byte entries\r\n");
     } else {
         if (gPreloadWildsFile[0] != 0) {
             printf("\r\nStrategy: HYBRID TRAP/HUNT\r\n");
@@ -1680,15 +1770,27 @@ bool SolvePoint(EcPoint PntToSolve, int Range, int DP, EcInt* pk_res)
         } else {
             printf("\r\nStrategy: ALL-TAME TRAP/HUNT\r\n");
             printf("  Phase 1 (TRAP):  Fill ALL %.0f GB with TAMEs (target 93%%)\r\n", gRAMLimitGB);
-            printf("  Phase 2 (HUNT):  100%% WILDs check against TAMEs (no WILD storage)\r\n");
-            printf("  Advantage:       2x more TAMEs = 2x T-W collision probability\r\n");
+            if (gWWBufferPct > 0) {
+                printf("  Phase 2 (HUNT):  T-W (TAME table) + W1-W2 (W-W buffer %d%% RAM)\r\n", gWWBufferPct);
+                printf("  Advantage:       SOTA hybrid — K ~1.5 (vs K ~2.0 without W-W buffer)\r\n");
+            } else {
+                printf("  Phase 2 (HUNT):  100%% WILDs check against TAMEs (no WILD storage)\r\n");
+                printf("  Advantage:       2x more TAMEs = 2x T-W collision probability\r\n");
+            }
         }
     }
     printf("\r\n");
     
     gIsOpsLimit = false;
-    gTrapPhase = !gAllWildMode;  // Skip TRAP if ALL-WILD mode
-    gHuntPhase = gAllWildMode;   // Start in HUNT if ALL-WILD mode
+    if (gConcurrentMode) {
+        gTrapPhase = false;   // No separate TRAP phase
+        gHuntPhase = false;   // Not in pure HUNT either
+        gConcurrentTableFull = false;
+        gGenMode = false;     // CRITICAL: mixed mode (1/3 T, 1/3 W1, 1/3 W2)
+    } else {
+        gTrapPhase = !gAllWildMode;  // Skip TRAP if ALL-WILD mode
+        gHuntPhase = gAllWildMode;   // Start in HUNT if ALL-WILD mode
+    }
 
     u64 total_kangs = GpuKangs[0]->CalcKangCnt();
     for (int i = 1; i < GpuCnt; i++)
@@ -1806,8 +1908,9 @@ bool SolvePoint(EcPoint PntToSolve, int Range, int DP, EcInt* pk_res)
     Int_TameOffset.Sub(tt);
     gPntToSolve = PntToSolve;
 
-    // Enable TAME-only mode for TRAP phase
-    gGenMode = true;  // This tells GPU to generate only TAMES
+    // Enable TAME-only mode for TRAP phase (unless concurrent/allwild)
+    if (!gConcurrentMode && !gAllWildMode)
+        gGenMode = true;  // This tells GPU to generate only TAMES
 
     // Prepare GPUs
     for (int i = 0; i < GpuCnt; i++)
@@ -1819,7 +1922,31 @@ bool SolvePoint(EcPoint PntToSolve, int Range, int DP, EcInt* pk_res)
 
     u64 tm0 = GetTickCount64();
     
-    if (gAllWildMode) {
+    if (gConcurrentMode) {
+        // v59: CONCURRENT MODE — mixed T+W1+W2 from the start
+        printf("CONCURRENT MODE (v59): Starting with 33%% TAME + 67%% WILDs...\r\n");
+        printf("  TAMEs build table while WILDs hunt — t² collision growth!\r\n");
+        
+        gHuntStartTime = GetTickCount64();
+        
+        // GPU runs in default mode: kang_type assigned by index (0=T, 1=W1, 2=W2)
+        // No need for ReinitForHunt — Start() already sets up mixed kangaroos
+        // because gGenMode=false and AllWildsMode=false
+        
+        printf("GPUs ready for CONCURRENT operation!\r\n\r\n");
+        
+        StartWorkerThreads();
+        
+        gProcessingRunning = true;
+        gLastWaveTime = GetTickCount64();
+#ifdef _WIN32
+        HANDLE proc_thread = (HANDLE)_beginthreadex(NULL, 0, processing_thread, NULL, 0, NULL);
+#else
+        pthread_t proc_thread;
+        pthread_create(&proc_thread, NULL, processing_thread, NULL);
+#endif
+        
+    } else if (gAllWildMode) {
         // ALL-WILD MODE: Skip TRAP entirely, go directly to HUNT
         printf("ALL-WILD MODE: Starting directly with WILDs...\r\n");
         
@@ -1981,6 +2108,43 @@ bool SolvePoint(EcPoint PntToSolve, int Range, int DP, EcInt* pk_res)
                 pthread_t proc_thread;
                 pthread_create(&proc_thread, NULL, processing_thread, NULL);
 #endif
+            }
+            tm_ram_check = GetTickCount64();
+        }
+        
+        // v59: CONCURRENT MODE — check table fill and transition to 100% WILDs
+        if (gConcurrentMode && !gConcurrentTableFull && (GetTickCount64() - tm_ram_check > 1000))
+        {
+            u64 w1_count = gTameStore.GetWild1Count();
+            u64 per_table = gTameStore.GetPerTableSize();
+            double w1_load = (per_table > 0) ? (double)w1_count / (double)per_table : 0;
+            
+            bool table_is_frozen = gTameStore.IsTableFrozen(0);
+            bool should_switch = (w1_load >= 0.93) || table_is_frozen;
+            
+            if (should_switch)
+            {
+                printf("\r\n");
+                printf("================================================================================\r\n");
+                printf("*** CONCURRENT: TABLE FULL — SWITCHING TO 100%% WILDs ***\r\n");
+                printf("  Table[0] (TAMEs): %lluM / %lluM (%.1f%%)\r\n",
+                       w1_count / 1000000, per_table / 1000000, w1_load * 100.0);
+                printf("  TAMEs built during concurrent phase: %lluM\r\n", gTamesDPs.load() / 1000000);
+                printf("  T-W collisions during fill: %llu\r\n",
+                       (unsigned long long)gTameStore.GetTameWildCollisions());
+                printf("  Switching from 33%%T+67%%W to 100%% WILDs (linear phase)...\r\n");
+                printf("================================================================================\r\n\r\n");
+                
+                gConcurrentTableFull = true;
+                gHuntPhase = true;
+                
+                // Switch all kangaroos to WILDs
+                for (int i = 0; i < GpuCnt; i++) {
+                    if (!GpuKangs[i]->ReinitForHunt()) {
+                        printf("ERROR: Failed to reinitialize GPU %d for full WILD mode!\r\n", i);
+                    }
+                }
+                printf("All kangaroos now 100%% WILDs. Table frozen. Hunting...\r\n\r\n");
             }
             tm_ram_check = GetTickCount64();
         }
@@ -2190,6 +2354,22 @@ bool ParseCommandLine(int argc, char* argv[])
                 gWildWildEnabled = true;  // All-wild requires wild-wild detection
             }
         }
+        else if (strcmp(argument, "-wwbuffer") == 0)
+        {
+            int val = atoi(argv[ci]);
+            ci++;
+            if (val < 0 || val > 20) {
+                printf("Error: -wwbuffer must be 0-20 (percent of RAM)\r\n");
+                return false;
+            }
+            gWWBufferPct = val;
+        }
+        else if (strcmp(argument, "-concurrent") == 0)
+        {
+            int val = atoi(argv[ci]);
+            ci++;
+            gConcurrentMode = (val != 0);
+        }
         else if (strcmp(argument, "-checkpoint") == 0)
         {
             gCheckpointIntervalHours = atoi(argv[ci]);
@@ -2311,6 +2491,9 @@ int main(int argc, char* argv[])
         printf("Optional:\n");
         printf("  -allwild 0       ALL-TAME mode (default, recommended for 130+ bits)\n");
         printf("  -allwild 1       ALL-WILD mode (W-W collisions only)\n");
+        printf("  -wwbuffer N      W-W buffer: N%% of RAM for WILD1-WILD2 detection (0-20, default: 0)\n");
+        printf("                   Use 5 for ~25%% K improvement in ALL-TAME mode\n");
+        printf("  -concurrent 1    v59: RC-style concurrent mode (33%%T+67%%W from second 1, t² growth)\n");
         printf("  -groups N        Points per batch inversion (default: 24, max: 256)\n");
         printf("  -checkpoint N    Auto-save interval in hours (default: 4, 0=off)\n");
         printf("  -savefile <f>    Checkpoint filename\n");

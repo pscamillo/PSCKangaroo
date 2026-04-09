@@ -39,3 +39,9 @@
 
 # debug information files
 *.dwo
+
+psckangaroo
+RESULTS.TXT
+*.dat
+*.chk
+*.log
