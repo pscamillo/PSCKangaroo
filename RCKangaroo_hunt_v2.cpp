@@ -790,6 +790,16 @@ volatile bool gForceTameMode = false;
 volatile bool gForceWildMode = false;
 
 double GetRAMUsageGB() {
+#ifdef _WIN32
+    MEMORYSTATUSEX memInfo;
+    memInfo.dwLength = sizeof(MEMORYSTATUSEX);
+    if (GlobalMemoryStatusEx(&memInfo)) {
+        u64 totalPhys = memInfo.ullTotalPhys;
+        u64 availPhys = memInfo.ullAvailPhys;
+        return (double)(totalPhys - availPhys) / (1024.0 * 1024.0 * 1024.0);
+    }
+    return 0.0;
+#else
     FILE* fp = fopen("/proc/meminfo", "r");
     if (!fp) return 0.0;
     
@@ -804,6 +814,7 @@ double GetRAMUsageGB() {
     }
     fclose(fp);
     return (double)(total - available) / (1024.0 * 1024.0);
+#endif
 }
 
 void SignalHandler(int sig) {

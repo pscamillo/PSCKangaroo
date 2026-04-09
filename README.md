@@ -222,6 +222,8 @@ The **SOTA method** (by RetiredCoder) uses equivalence classes and the negation 
 
 ## Build
 
+### Linux
+
 ```bash
 git clone https://github.com/pscamillo/PSCKangaroo.git
 cd PSCKangaroo
@@ -232,13 +234,24 @@ cd PSCKangaroo
 make clean && make
 ```
 
+### Windows
+
+Requirements: Visual Studio 2022 + CUDA Toolkit 12.8+ (with VS integration).
+
+1. Clone the repository
+2. Open `PSCKangaroo.sln` in Visual Studio
+3. Select **Release | x64**
+4. Build (F7)
+
+The `.vcxproj` targets CUDA 12.8. If you have a different CUDA version, right-click the project → Build Dependencies → Build Customizations → select your installed CUDA version.
+
 ### GPU Architecture
 
-| GPU Series | Makefile Setting |
-|---|---|
-| RTX 3060/3070/3080/3090 | `GPU_ARCH="-gencode=arch=compute_86,code=sm_86"` |
-| RTX 4060/4070/4080/4090 | `GPU_ARCH="-gencode=arch=compute_89,code=sm_89"` |
-| RTX 5070/5080/5090 | `GPU_ARCH="-gencode=arch=compute_120,code=sm_120"` (default) |
+| GPU Series | Linux Makefile | Windows (auto-detected) |
+|---|---|---|
+| RTX 3060/3070/3080/3090 | `GPU_ARCH="-gencode=arch=compute_86,code=sm_86"` | sm_86 |
+| RTX 4060/4070/4080/4090 | `GPU_ARCH="-gencode=arch=compute_89,code=sm_89"` | sm_89 |
+| RTX 5070/5080/5090 | `GPU_ARCH="-gencode=arch=compute_120,code=sm_120"` (default) | sm_120 |
 
 ## Requirements
 
