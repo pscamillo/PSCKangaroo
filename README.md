@@ -42,7 +42,7 @@ That said, someone running a single GPU 24/7 with checkpoint protection has a no
 
 ## Benchmark: PSCKangaroo v59 vs RCKangaroo v3.1
 
-**Hardware:** NVIDIA RTX 5070 (Blackwell, 12 GB VRAM) / AMD Ryzen 7 9800X3D / 123 GB RAM / CUDA 12.9 / Linux
+**Hardware:** NVIDIA RTX 5070 (Blackwell, 12 GB VRAM) / AMD Ryzen 7 9800X3D / 128 GB RAM / CUDA 12.9 / Linux
 
 **Puzzle 80** (79-bit range, known private key `ea1a5c66dcc11b5ad180`), 5 runs each:
 
