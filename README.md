@@ -120,6 +120,20 @@ This runs TAME and WILD kangaroos simultaneously from second 1 (like RCKangaroo)
   -loadwild wild_checkpoint.dat
 ```
 
+### Multiple GPUs (experimental)
+
+Multi-GPU support is inherited from RCKangaroo but has not been tested with PSCKangaroo's concurrent mode. If you have multiple GPUs and want to try:
+
+```bash
+# Two GPUs (GPU 0 and GPU 1)
+./psckangaroo -gpu 01 -dp 16 -range 134 \
+  -pubkey 02145d2611c823a396ef6712ce0f712f09b9b4f3135e3e0aa3230fb9b6d08d1e16 \
+  -start 4000000000000000000000000000000000 \
+  -ramlimit 120 -concurrent 1 -wwbuffer 5 -checkpoint 4
+```
+
+Please report results via [GitHub Issues](https://github.com/pscamillo/PSCKangaroo/issues).
+
 ### Validation (Puzzle 70, ~30 seconds)
 
 ```bash
@@ -205,7 +219,7 @@ The **SOTA method** (by RetiredCoder) uses equivalence classes and the negation 
 
 | Option | Description | Default |
 |---|---|---|
-| `-gpu N` | GPU index | 0 |
+| `-gpu N` | GPU index(es) — e.g., `0` for one GPU, `01` for two (multi-GPU is experimental) | 0 |
 | `-dp N` | Distinguished point bits (6–60) | — |
 | `-range N` | Key range in bits (32–170) | — |
 | `-pubkey <hex>` | Target compressed public key | — |
