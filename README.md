@@ -249,14 +249,17 @@ The `.vcxproj` targets CUDA 12.8. If you have a different CUDA version, right-cl
 
 | GPU Series | Linux Makefile | Windows (auto-detected) |
 |---|---|---|
+| RTX 2060/2070/2080 | `GPU_ARCH="-gencode=arch=compute_75,code=sm_75"` | sm_75 |
 | RTX 3060/3070/3080/3090 | `GPU_ARCH="-gencode=arch=compute_86,code=sm_86"` | sm_86 |
 | RTX 4060/4070/4080/4090 | `GPU_ARCH="-gencode=arch=compute_89,code=sm_89"` | sm_89 |
 | RTX 5070/5080/5090 | `GPU_ARCH="-gencode=arch=compute_120,code=sm_120"` (default) | sm_120 |
 
+**CUDA 13.0 note:** CUDA 13.0+ dropped support for Maxwell, Pascal, and Volta architectures. If you use CUDA 13.0+, you need at least Turing (RTX 2060 / sm_75). For older GPUs (GTX 1060/1070/1080), use CUDA 12.x.
+
 ## Requirements
 
-- **GPU:** NVIDIA with Compute Capability ≥ 6.0 (Pascal or newer)
-- **CUDA Toolkit:** 12.0+
+- **GPU:** NVIDIA with Compute Capability ≥ 7.5 (Turing or newer) for CUDA 13.0+, or ≥ 6.0 (Pascal or newer) for CUDA 12.x
+- **CUDA Toolkit:** 12.0+ (tested on 12.9)
 - **RAM:** 8 GB minimum, 128 GB recommended for large puzzles
 - **OS:** Linux (Ubuntu 22.04+) or Windows
 
