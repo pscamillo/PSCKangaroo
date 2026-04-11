@@ -74,7 +74,7 @@ That said, someone running a single GPU 24/7 with checkpoint protection has a no
 | Pre-generate TAMEs | Yes (`-tames file -max N`) | Yes (checkpoint system) |
 | Ops limit | `-max` (stops solver, no save) | Runs indefinitely |
 | Puzzle 80 median | **301s** (faster) | 320s |
-| Puzzle 135+ viability | Needs DP≥24, no crash recovery | DP=14, checkpoint every 4h |
+| Puzzle 135+ viability | Needs DP≥24, no crash recovery | DP=16, checkpoint every 4h |
 
 **Note on RCKangaroo's `-tames` feature:** RC can pre-generate a TAME table with `-tames file -max N` and reload it across multiple runs. This gives a head start but is not a full checkpoint — WILDs and solve progress are not saved. If the solver crashes during a solve, only the pre-generated tame file survives.
 
@@ -100,7 +100,7 @@ PSCKangaroo with `-ramlimit 120` runs indefinitely at any DP value. When the tab
 ### Recommended: Concurrent mode (v59)
 
 ```bash
-./psckangaroo -gpu 0 -dp 14 -range 134 \
+./psckangaroo -gpu 0 -dp 16 -range 134 \
   -pubkey 02145d2611c823a396ef6712ce0f712f09b9b4f3135e3e0aa3230fb9b6d08d1e16 \
   -start 4000000000000000000000000000000000 \
   -ramlimit 120 -concurrent 1 -wwbuffer 5 -checkpoint 4
@@ -108,10 +108,12 @@ PSCKangaroo with `-ramlimit 120` runs indefinitely at any DP value. When the tab
 
 This runs TAME and WILD kangaroos simultaneously from second 1 (like RCKangaroo), but with memory protection, checkpoint, and 16-byte compact entries.
 
+> **DP value note:** Lower DP values (12–14) generate more collision candidates per second but increase CPU load and temperature during the HUNT phase. For 24/7 operation, DP=16 is recommended as a balance between collision rate and thermal stability. For short validation runs, DP=12 is fine.
+
 ### Resume from checkpoint
 
 ```bash
-./psckangaroo -gpu 0 -dp 14 -range 134 \
+./psckangaroo -gpu 0 -dp 16 -range 134 \
   -pubkey 02145d2611c823a396ef6712ce0f712f09b9b4f3135e3e0aa3230fb9b6d08d1e16 \
   -start 4000000000000000000000000000000000 \
   -ramlimit 120 -concurrent 1 -wwbuffer 5 -checkpoint 4 \
