@@ -790,16 +790,6 @@ volatile bool gForceTameMode = false;
 volatile bool gForceWildMode = false;
 
 double GetRAMUsageGB() {
-#ifdef _WIN32
-    MEMORYSTATUSEX memInfo;
-    memInfo.dwLength = sizeof(MEMORYSTATUSEX);
-    if (GlobalMemoryStatusEx(&memInfo)) {
-        u64 totalPhys = memInfo.ullTotalPhys;
-        u64 availPhys = memInfo.ullAvailPhys;
-        return (double)(totalPhys - availPhys) / (1024.0 * 1024.0 * 1024.0);
-    }
-    return 0.0;
-#else
     FILE* fp = fopen("/proc/meminfo", "r");
     if (!fp) return 0.0;
     
@@ -814,7 +804,6 @@ double GetRAMUsageGB() {
     }
     fclose(fp);
     return (double)(total - available) / (1024.0 * 1024.0);
-#endif
 }
 
 void SignalHandler(int sig) {
@@ -1406,6 +1395,18 @@ void CheckNewPoints()
             u8 type_info = p[40];  
             u8 kang_type = GET_KANG_TYPE(type_info);
             u8 endo_transform = GET_ENDO_TRANSFORM(type_info);
+            
+            // v59 FIX: Concurrent mode — route TAMEs to table (same logic as WorkerThread)
+            if (gConcurrentMode && !gConcurrentTableFull && !gTrapPhase) {
+                if (kang_type == TAME) {
+                    dist_bytes[22] = (endo_transform << 4) | TAME;
+                    dist_bytes[23] = 0;
+                    gTameStore.AddTame(x_bytes, dist_bytes);
+                    gTamesDPs++;
+                    continue;  // TAME stored, next DP
+                }
+                // WILD1/WILD2 fall through to check logic below
+            }
             
             if (gTrapPhase) {
                 // v51: Store real TAMEs in table[0]
