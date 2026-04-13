@@ -7,17 +7,17 @@
 #ifdef _MSC_VER
 #include <intrin.h>
 // MSVC doesn't support unsigned __int128. Emulate with struct + intrinsics.
+// Note: uses unsigned __int64 directly since u64 typedef is not yet available.
 struct uint128_t {
-    u64 lo, hi;
+    unsigned __int64 lo, hi;
     uint128_t() : lo(0), hi(0) {}
-    uint128_t(u64 v) : lo(v), hi(0) {}
-    // Multiply two u64 → 128-bit
-    static uint128_t mul(u64 a, u64 b) {
+    uint128_t(unsigned __int64 v) : lo(v), hi(0) {}
+    static uint128_t mul(unsigned __int64 a, unsigned __int64 b) {
         uint128_t r;
         r.lo = _umul128(a, b, &r.hi);
         return r;
     }
-    uint128_t operator+(u64 v) const {
+    uint128_t operator+(unsigned __int64 v) const {
         uint128_t r;
         r.lo = lo + v;
         r.hi = hi + (r.lo < lo ? 1 : 0);
@@ -29,14 +29,14 @@ struct uint128_t {
         r.hi = hi + o.hi + (r.lo < lo ? 1 : 0);
         return r;
     }
-    uint128_t& operator+=(u64 v) { *this = *this + v; return *this; }
+    uint128_t& operator+=(unsigned __int64 v) { *this = *this + v; return *this; }
     uint128_t& operator+=(const uint128_t& o) { *this = *this + o; return *this; }
-    explicit operator u64() const { return lo; }
-    u64 shr64() const { return hi; }  // equivalent to >> 64
+    explicit operator unsigned __int64() const { return lo; }
+    unsigned __int64 shr64() const { return hi; }
 };
-#define UINT128_MUL(a, b) uint128_t::mul((u64)(a), (u64)(b))
+#define UINT128_MUL(a, b) uint128_t::mul((unsigned __int64)(a), (unsigned __int64)(b))
 #define UINT128_SHR64(x) ((x).shr64())
-#define UINT128_LO(x) ((u64)(x))
+#define UINT128_LO(x) ((unsigned __int64)(x))
 #else
 // GCC/Clang: native unsigned __int128
 typedef unsigned __int128 uint128_t;
