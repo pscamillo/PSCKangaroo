@@ -33,6 +33,9 @@
 #include <cstdio>
 #include <atomic>
 #include <mutex>
+#ifdef _MSC_VER
+#include <intrin.h>
+#endif
 #include "defs.h"
 
 // ============================================================================
@@ -93,7 +96,11 @@ public:
     void lock() {
         while (flag.test_and_set(std::memory_order_acquire)) {
             #if defined(__x86_64__) || defined(_M_X64)
+            #ifdef _MSC_VER
+            _mm_pause();
+            #else
             __builtin_ia32_pause();
+            #endif
             #endif
         }
     }

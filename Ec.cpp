@@ -4,6 +4,46 @@
 // https://github.com/RetiredC
 // Modified with Endomorphism support
 
+#ifdef _MSC_VER
+#include <intrin.h>
+// MSVC doesn't support unsigned __int128. Emulate with struct + intrinsics.
+struct uint128_t {
+    u64 lo, hi;
+    uint128_t() : lo(0), hi(0) {}
+    uint128_t(u64 v) : lo(v), hi(0) {}
+    // Multiply two u64 → 128-bit
+    static uint128_t mul(u64 a, u64 b) {
+        uint128_t r;
+        r.lo = _umul128(a, b, &r.hi);
+        return r;
+    }
+    uint128_t operator+(u64 v) const {
+        uint128_t r;
+        r.lo = lo + v;
+        r.hi = hi + (r.lo < lo ? 1 : 0);
+        return r;
+    }
+    uint128_t operator+(const uint128_t& o) const {
+        uint128_t r;
+        r.lo = lo + o.lo;
+        r.hi = hi + o.hi + (r.lo < lo ? 1 : 0);
+        return r;
+    }
+    uint128_t& operator+=(u64 v) { *this = *this + v; return *this; }
+    uint128_t& operator+=(const uint128_t& o) { *this = *this + o; return *this; }
+    explicit operator u64() const { return lo; }
+    u64 shr64() const { return hi; }  // equivalent to >> 64
+};
+#define UINT128_MUL(a, b) uint128_t::mul((u64)(a), (u64)(b))
+#define UINT128_SHR64(x) ((x).shr64())
+#define UINT128_LO(x) ((u64)(x))
+#else
+// GCC/Clang: native unsigned __int128
+typedef unsigned __int128 uint128_t;
+#define UINT128_MUL(a, b) ((uint128_t)(u64)(a) * (u64)(b))
+#define UINT128_SHR64(x) ((u64)((x) >> 64))
+#define UINT128_LO(x) ((u64)(x))
+#endif
 
 #include "defs.h"
 #include "Ec.h"
@@ -790,42 +830,42 @@ static void Reduce512ModN(u64 r[8], u64 out[4])
 		for (int i = 0; i < 4; i++)
 		{
 			if (!hi[i]) continue;
-			unsigned __int128 carry = 0;
+			uint128_t carry;
 			
 			// × c0
-			carry = (unsigned __int128)hi[i] * c0 + prod[i];
-			prod[i] = (u64)carry;
+			carry = UINT128_MUL(hi[i], c0) + prod[i];
+			prod[i] = UINT128_LO(carry);
 			
 			// × c1
-			carry = (unsigned __int128)hi[i] * c1 + prod[i+1] + (carry >> 64);
-			prod[i+1] = (u64)carry;
+			carry = UINT128_MUL(hi[i], c1) + prod[i+1] + UINT128_SHR64(carry);
+			prod[i+1] = UINT128_LO(carry);
 			
 			// × c2 (c2 = 1, so just add hi[i])
-			carry = (unsigned __int128)hi[i] + prod[i+2] + (carry >> 64);
-			prod[i+2] = (u64)carry;
+			carry = uint128_t(hi[i]) + prod[i+2] + UINT128_SHR64(carry);
+			prod[i+2] = UINT128_LO(carry);
 			
 			// Propagate remaining carry
-			u64 c = (u64)(carry >> 64);
+			u64 c = UINT128_SHR64(carry);
 			for (int k = i+3; k < 8 && c; k++)
 			{
-				unsigned __int128 s = (unsigned __int128)prod[k] + c;
-				prod[k] = (u64)s;
-				c = (u64)(s >> 64);
+				uint128_t s = uint128_t(prod[k]) + c;
+				prod[k] = UINT128_LO(s);
+				c = UINT128_SHR64(s);
 			}
 		}
 		
 		// Add lo to prod: result = lo + hi*c
-		unsigned __int128 sum = (unsigned __int128)lo[0] + prod[0];
-		lo[0] = (u64)sum;
-		sum = (unsigned __int128)lo[1] + prod[1] + (sum >> 64);
-		lo[1] = (u64)sum;
-		sum = (unsigned __int128)lo[2] + prod[2] + (sum >> 64);
-		lo[2] = (u64)sum;
-		sum = (unsigned __int128)lo[3] + prod[3] + (sum >> 64);
-		lo[3] = (u64)sum;
+		uint128_t sum = uint128_t(lo[0]) + prod[0];
+		lo[0] = UINT128_LO(sum);
+		sum = uint128_t(lo[1]) + prod[1] + UINT128_SHR64(sum);
+		lo[1] = UINT128_LO(sum);
+		sum = uint128_t(lo[2]) + prod[2] + UINT128_SHR64(sum);
+		lo[2] = UINT128_LO(sum);
+		sum = uint128_t(lo[3]) + prod[3] + UINT128_SHR64(sum);
+		lo[3] = UINT128_LO(sum);
 		
 		// New hi = upper part of result
-		u64 carry_out = (u64)(sum >> 64);
+		u64 carry_out = UINT128_SHR64(sum);
 		hi[0] = prod[4] + carry_out;
 		carry_out = (hi[0] < prod[4]) ? 1 : 0;
 		hi[1] = prod[5] + carry_out;
@@ -880,11 +920,11 @@ void EcInt::MulLambdaModN()
 		u64 carry = 0;
 		for (int j = 0; j < 4; j++)
 		{
-			unsigned __int128 prod = (unsigned __int128)data[i] * g_Lambda.data[j];
+			uint128_t prod = UINT128_MUL(data[i], g_Lambda.data[j]);
 			prod += r[i+j];
 			prod += carry;
-			r[i+j] = (u64)prod;
-			carry = (u64)(prod >> 64);
+			r[i+j] = UINT128_LO(prod);
+			carry = UINT128_SHR64(prod);
 		}
 		r[i+4] = carry;
 	}
@@ -904,11 +944,11 @@ void EcInt::MulLambda2ModN()
 		u64 carry = 0;
 		for (int j = 0; j < 4; j++)
 		{
-			unsigned __int128 prod = (unsigned __int128)data[i] * g_Lambda2.data[j];
+			uint128_t prod = UINT128_MUL(data[i], g_Lambda2.data[j]);
 			prod += r[i+j];
 			prod += carry;
-			r[i+j] = (u64)prod;
-			carry = (u64)(prod >> 64);
+			r[i+j] = UINT128_LO(prod);
+			carry = UINT128_SHR64(prod);
 		}
 		r[i+4] = carry;
 	}

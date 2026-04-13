@@ -8,6 +8,10 @@
 // ALL-WILD (-allwild 1): Dual table W-W collisions only
 // HYBRID: Preload checkpoint + live hunt
 
+#ifdef _MSC_VER
+#define NOMINMAX  // Prevent Windows.h from defining min/max macros
+#endif
+
 #include <iostream>
 #include <vector>
 #include <signal.h>
