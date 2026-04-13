@@ -283,9 +283,11 @@ The `.vcxproj` targets CUDA 12.8. If you have a different CUDA version, right-cl
 
 | GPU | Speed | Notes |
 |---|---|---|
-| RTX 5070 (Blackwell) | ~3.1 GKeys/s | Tested |
-| RTX 4090 (Ada) | ~3.5 GKeys/s | Estimated |
-| RTX 3090 (Ampere) | ~1.5 GKeys/s | Estimated |
+| RTX 5070 Ti (Blackwell) | ~4.5 GKeys/s | Confirmed by user (Windows) |
+| RTX 5070 (Blackwell) | ~3.0 GKeys/s | Tested (Linux) |
+| RTX 5070 × 2 (multi-GPU) | ~5.8 GKeys/s | Confirmed by user (Linux, experimental) |
+| RTX 2070 (Turing) | ~1.2 GKeys/s | Confirmed by user (Windows) |
+| GTX 1060 (Pascal) | ~0.19 GKeys/s | Confirmed by user (Linux) |
 
 ## Design History
 
