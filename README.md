@@ -342,3 +342,13 @@ GPLv3 — see [LICENSE](LICENSE). Derivative work of [RCKangaroo](https://github
 ## Disclaimer
 
 This software is provided for educational and research purposes. Solving Bitcoin puzzle challenges is a probabilistic endeavor — there is no guarantee of success regardless of hardware or software used. Use responsibly and in accordance with applicable laws.
+
+## Supporting development
+
+If this project is useful to you, consider **starring the repository** — it helps visibility and signals to others that the work matters.
+
+If you want to support continued development directly:
+
+**BTC (bech32):** `bc1q62axpzhteksv4yhqhfzvmeqqq98gcvzfak0etk`
+
+Hardware, electricity, and tooling costs are real, though partially offset by solar power. Contributions of code, benchmarks, bug reports, and documentation are also welcome — open an issue or pull request.
