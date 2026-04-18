@@ -333,7 +333,7 @@ The original PSCKangaroo architecture used sequential TRAP/HUNT phases — fill 
 - **[RetiredCoder (RC)](https://github.com/RetiredC)** — Original RCKangaroo, SOTA method, GPU kernel, batch Montgomery inversion, PTX assembly. The core algorithm is entirely his work.
 - **[JeanLucPons](https://github.com/JeanLucPons)** — Foundational Kangaroo/VanitySearch/BSGS implementations.
 - **kTimesG** — Critical feedback on endomorphism/cheap point/XDP that led to the v57 cleanup.
-- **PSC** — Concurrent mode (v59), W-W buffer (v58), ALL-TAME mode, 16-byte compact entries, async BSGS resolver, checkpoint system, table freeze, `-ramlimit`.
+- **pscamillo** — Concurrent mode (v59), W-W buffer (v58), ALL-TAME mode, 16-byte compact entries, async BSGS resolver, checkpoint system, table freeze, `-ramlimit`.
 
 ## License
 
