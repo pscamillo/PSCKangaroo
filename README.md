@@ -335,6 +335,10 @@ The original PSCKangaroo architecture used sequential TRAP/HUNT phases — fill 
 - **kTimesG** — Critical feedback on endomorphism/cheap point/XDP that led to the v57 cleanup.
 - **pscamillo** — Concurrent mode (v59), W-W buffer (v58), ALL-TAME mode, 16-byte compact entries, async BSGS resolver, checkpoint system, table freeze, `-ramlimit`.
 
+## Related work
+
+- [mr_blackwell](https://github.com/pscamillo/mr_blackwell) — Native Miller-Rabin GPU kernel for Blackwell SM 12.0. Same author, related domain (modular arithmetic on GPU), independent project.
+
 ## License
 
 GPLv3 — see [LICENSE](LICENSE). Derivative work of [RCKangaroo](https://github.com/RetiredC/RCKangaroo).
