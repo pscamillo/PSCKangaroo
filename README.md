@@ -1,20 +1,20 @@
 # PSCKangaroo
 
-GPU-accelerated Pollard's Kangaroo for solving the Elliptic Curve Discrete Logarithm Problem (ECDLP) on secp256k1.
+GPU-accelerated **Pollard's Kangaroo** for solving the Elliptic Curve Discrete Logarithm Problem (ECDLP) on **secp256k1**.
 
-A fork of [RCKangaroo](https://github.com/RetiredC/RCKangaroo) by RetiredCoder. Special thanks to RetiredCoder for the SOTA method and GPU kernel architecture — the core algorithm and GPU kernel are his work.
+A fork of [RCKangaroo](https://github.com/RetiredC/RCKangaroo) by [RetiredCoder](https://github.com/RetiredC). Special thanks to RetiredCoder for the SOTA method and GPU kernel architecture — the core algorithm and GPU kernel are his work.
 
 ## Purpose
 
-PSCKangaroo is built for one scenario: long-running ECDLP puzzles on a single GPU with lots of RAM.
+PSCKangaroo is built for one scenario: **long-running ECDLP puzzles on a single GPU with lots of RAM.**
 
-The Bitcoin Puzzle Transaction challenges define this scenario — known public keys, defined search ranges, and puzzles that may take years on a single machine. When a run may last months or years, what matters is:
+The [Bitcoin Puzzle Transaction](https://bitcointalk.org/index.php?topic=1306983.0) challenges define this scenario — known public keys, defined search ranges, and puzzles that may take years on a single machine. When a run may last months or years, what matters is:
 
-**No wasted work.** Crashes, reboots, power outages, kernel updates — they all happen. Without checkpoint/resume, months of computation are lost. PSCKangaroo auto-saves and resumes from where it stopped.
+1. **No wasted work.** Crashes, reboots, power outages, kernel updates — they all happen. Without checkpoint/resume, months of computation are lost. PSCKangaroo auto-saves and resumes from where it stopped.
 
-**No memory crashes.** RCKangaroo has no RAM limit — it allocates memory until the OS kills it (see OOM analysis below). PSCKangaroo's `-ramlimit` guarantees stable operation indefinitely.
+2. **No memory crashes.** RCKangaroo has no RAM limit — it allocates memory until the OS kills it (see [OOM analysis](#oom-analysis) below). PSCKangaroo's `-ramlimit` guarantees stable operation indefinitely.
 
-**More entries per GB.** PSCKangaroo uses 16-byte entries vs ~40 bytes in RCKangaroo (32 data + 4 pointer + 4 overhead, per RC's own RAM formula). That's 2.5× more DPs in the same RAM.
+3. **More entries per GB.** PSCKangaroo uses 16-byte entries vs ~40 bytes in RCKangaroo (32 data + 4 pointer + 4 overhead, per RC's own [RAM formula](https://github.com/RetiredC/RCKangaroo/blob/main/RCKangaroo.cpp#L328)). That's **2.5× more DPs in the same RAM**.
 
 For short puzzles (≤ 80 bits), RCKangaroo is faster — see benchmark below. PSCKangaroo targets the puzzles where RCKangaroo can't run safely for extended periods.
 
@@ -22,19 +22,19 @@ For short puzzles (≤ 80 bits), RCKangaroo is faster — see benchmark below. P
 
 Before choosing any solver, it's important to understand the scale of what we're attempting.
 
-Puzzle 135 has a 134-bit search range. The expected number of operations to solve it is `~1.15 × √(2¹³⁴) ≈ 2⁶⁷·² operations` — roughly 1.7 × 10²⁰.
+**Puzzle 135** has a 134-bit search range. The expected number of operations to solve it is ~1.15 × √(2¹³⁴) ≈ **2⁶⁷·² operations** — roughly **1.7 × 10²⁰**.
 
 At 3.3 GKeys/s (RTX 5070, v60), that's:
 
 | Metric | Value |
 |---|---|
 | Operations needed | ~1.7 × 10²⁰ |
-| Time at 3.3 GK/s | ~1,630 years |
+| Time at 3.3 GK/s | **~1,630 years** |
 | Time with 10 GPUs | ~163 years |
 | Time with 100 GPUs | ~16.3 years |
 | Time with 1,000 GPUs | ~1.6 years |
 
-No single-GPU solver — RCKangaroo, PSCKangaroo, or any other — can reliably solve Puzzle 135 in a human lifetime. Everyone running these solvers on Puzzle 135 is playing a probabilistic lottery: hoping to find the collision early, long before the expected time. Some will get lucky; most won't.
+**No single-GPU solver — RCKangaroo, PSCKangaroo, or any other — can reliably solve Puzzle 135 in a human lifetime.** Everyone running these solvers on Puzzle 135 is playing a probabilistic lottery: hoping to find the collision early, long before the expected time. Some will get lucky; most won't.
 
 PSCKangaroo doesn't change this reality. It is one more tool in the toolbox — optimized for crash resilience and memory efficiency on long runs. The mathematical difficulty of large puzzles requires either massive parallelism (hundreds of GPUs), a breakthrough in algorithms, or extraordinary luck.
 
@@ -44,37 +44,38 @@ That said, someone running a single GPU 24/7 with checkpoint protection has a no
 
 **Hardware:** NVIDIA RTX 5070 (Blackwell, 12 GB VRAM) / AMD Ryzen 7 9800X3D / 123 GB RAM / CUDA 12.9 / Linux
 
-> **Note:** The benchmark below is from v59 (`PNT_GROUP_CNT=24`). With v60's default of `PNT_GROUP_CNT=48`, PSCKangaroo kernel throughput is ~20% higher (2.7 → 3.3 GKeys/s on RTX 5070), so PSC solve times are expected to drop proportionally for puzzles where the kernel dominates total runtime. A re-run of the Puzzle 80 benchmark with v60 is planned and will replace this table when ready.
+> **Note:** The benchmark below is from **v59** (`PNT_GROUP_CNT=24`). With v60's default of `PNT_GROUP_CNT=48`, PSCKangaroo kernel throughput is ~20% higher (2.7 → 3.3 GKeys/s on RTX 5070), so PSC solve times are expected to drop proportionally for puzzles where the kernel dominates total runtime. A re-run of the Puzzle 80 benchmark with v60 is planned and will replace this table when ready.
 
-Puzzle 80 (79-bit range, known private key `ea1a5c66dcc11b5ad180`), 5 runs each, **v59**:
+**Puzzle 80** (79-bit range, known private key `ea1a5c66dcc11b5ad180`), 5 runs each, **v59**:
 
 | Configuration | Median | Mean | Min | Max | Solved |
 |---|---|---|---|---|---|
-| RCKangaroo `DP=16` | 301s | 299s | 120s | 514s | 5/5 |
-| PSC v59 concurrent `DP=12 RAM=8GB` | 320s | 463s | 236s | 837s | 5/5 |
-| PSC v59 concurrent `DP=14 RAM=20GB` | 423s | 536s | 142s | 1223s | 5/5 |
-| PSC v59 concurrent `DP=12 RAM=20GB` | 491s | 558s | 252s | 817s | 5/5 |
+| **RCKangaroo** DP=16 | **301s** | 299s | 120s | 514s | 5/5 |
+| **PSC v59** concurrent DP=12 RAM=8GB | **320s** | 463s | 236s | 837s | 5/5 |
+| **PSC v59** concurrent DP=14 RAM=20GB | 423s | 536s | 142s | 1223s | 5/5 |
+| **PSC v59** concurrent DP=12 RAM=20GB | 491s | 558s | 252s | 817s | 5/5 |
 
 **Observations:**
 
 - RCKangaroo won by ~6% on median in **v59** (301s vs 320s). With v60's `PNT_GROUP_CNT=48` tuning on Blackwell, PSCKangaroo is expected to match or exceed RC's times on RTX 5070 — RC could in principle adopt the same tuning by recompiling, but is not under active maintenance.
 - PSC's best single run (142s) was faster than RC's best (120s) — high variance is normal for a probabilistic algorithm.
-- For Puzzle 80 and similar short puzzles, both solvers solve in minutes with zero setup overhead. PSCKangaroo's advantage is in long runs (months/years), not sprints.
+- Both solvers run the same GPU kernel — at ~3.1 GKeys/s in v59, ~3.3 GKeys/s in v60 (RTX 5070).
+- **For Puzzle 80 and similar short puzzles, both solvers solve in minutes with zero setup overhead.** PSCKangaroo's advantage is in long runs (months/years), not sprints.
 
 ## How RCKangaroo and PSCKangaroo Compare
 
 | Aspect | RCKangaroo v3.1 | PSCKangaroo v60 |
 |---|---|---|
-| GPU kernel speed | ~3.1 GKeys/s | ~3.3 GKeys/s (same kernel source, `PNT_GROUP_CNT=48` default) |
-| Effective bytes per DP | ~40 B | 16 B (2.5× more entries/GB) |
+| GPU kernel speed | ~3.1 GKeys/s | **~3.3 GKeys/s** (same kernel source, `PNT_GROUP_CNT=48` default) |
+| Effective bytes per DP | **~40 B** | **16 B** (2.5× more entries/GB) |
 | RAM management | No limit (grows until OOM) | `-ramlimit` (stable indefinitely) |
-| Checkpoint | `-tames` (pre-generated TAMEs only) | Full (auto-save + Ctrl+C safe) |
+| Checkpoint | **`-tames` (pre-generated TAMEs only)** | **Full** (auto-save + Ctrl+C safe) |
 | Crash recovery | Loses all WILDs and solve progress | Resumes from last checkpoint |
 | Collision dynamics | Concurrent T+W (t² growth, K≈1.15) | Concurrent T+W (t² growth) |
-| Minimum DP @120GB | DP≥24 to run for months | DP=12+ safely |
+| Minimum DP @120GB | DP≥24 to run for months | **DP=12+** safely |
 | Pre-generate TAMEs | Yes (`-tames file -max N`) | Yes (checkpoint system) |
 | Ops limit | `-max` (stops solver, no save) | Runs indefinitely |
-| Puzzle 80 median (v59 data) | 301s | 320s (v60 estimated ~252s) |
+| Puzzle 80 median (v59 data) | **301s** | 320s (v60 estimated ~252s) |
 | Puzzle 135+ viability | Needs DP≥24, no crash recovery | DP=16, checkpoint every 4h |
 
 **Note on RCKangaroo's `-tames` feature:** RC can pre-generate a TAME table with `-tames file -max N` and reload it across multiple runs. This gives a head start but is not a full checkpoint — WILDs and solve progress are not saved. If the solver crashes during a solve, only the pre-generated tame file survives.
@@ -87,12 +88,12 @@ RCKangaroo stores every DP unconditionally. At ~40 bytes per entry with no RAM l
 
 | DP | DPs/s @3.3GK/s | Growth rate | OOM on 120 GB system |
 |---|---|---|---|
-| 14 | 201,416 | 8.1 MB/s | ~4.1 hours |
-| 16 | 50,354 | 2.0 MB/s | ~16.5 hours |
-| 20 | 3,147 | 126 KB/s | ~11.0 days |
-| 24 | 197 | 7.9 KB/s | ~5.9 months |
+| 14 | 201,416 | 8.1 MB/s | **~4.1 hours** |
+| 16 | 50,354 | 2.0 MB/s | **~16.5 hours** |
+| 20 | 3,147 | 126 KB/s | **~11.0 days** |
+| 24 | 197 | 7.9 KB/s | **~5.9 months** |
 
-These times are computed from RC's own RAM formula: `(32 + 4 + 4) × total_ops / 2^DP`, verified in `RCKangaroo.cpp` line 328. The malloc inside RC's MemPool does not check for allocation failure — OOM results in a segfault with no save.
+These times are computed from RC's own RAM formula: `(32 + 4 + 4) × total_ops / 2^DP`, verified in `RCKangaroo.cpp` line 328. The `malloc` inside RC's MemPool does not check for allocation failure — OOM results in a segfault with no save.
 
 PSCKangaroo with `-ramlimit 120` runs indefinitely at any DP value. When the table reaches 93% capacity, it freezes (no new TAMEs stored) and continues hunting with 100% WILDs.
 
@@ -109,7 +110,7 @@ PSCKangaroo with `-ramlimit 120` runs indefinitely at any DP value. When the tab
 
 This runs TAME and WILD kangaroos simultaneously from second 1 (like RCKangaroo), but with memory protection, checkpoint, and 16-byte compact entries.
 
-**DP value note:** Lower DP values (12–14) generate more collision candidates per second but increase CPU load and temperature during the HUNT phase. For 24/7 operation, `DP=16` is recommended as a balance between collision rate and thermal stability. For short validation runs, `DP=12` is fine.
+> **DP value note:** Lower DP values (12–14) generate more collision candidates per second but increase CPU load and temperature during the HUNT phase. For 24/7 operation, DP=16 is recommended as a balance between collision rate and thermal stability. For short validation runs, DP=12 is fine.
 
 ### Resume from checkpoint
 
@@ -133,7 +134,7 @@ Multi-GPU support is inherited from RCKangaroo but has not been tested with PSCK
   -ramlimit 120 -concurrent 1 -wwbuffer 5 -checkpoint 4
 ```
 
-Please report results via GitHub Issues.
+Please report results via [GitHub Issues](https://github.com/pscamillo/PSCKangaroo/issues).
 
 ### Validation (Puzzle 70, ~30 seconds)
 
@@ -197,14 +198,14 @@ Reserves 5% of RAM for a WILD1-WILD2 cross-collision buffer. Adds a second colli
 
 Pollard's Kangaroo solves ECDLP by launching pseudo-random walks on the elliptic curve:
 
-- **TAME** kangaroos start from known positions (`k·G` where `k` is known)
-- **WILD** kangaroos start from positions derived from the target public key
+- **TAME kangaroos** start from known positions (k·G where k is known)
+- **WILD kangaroos** start from positions derived from the target public key
 
 When a TAME and WILD land on the same distinguished point (collision), the private key is computed from the difference in their accumulated walk distances.
 
 **Distinguished Points (DPs)** are positions where the x-coordinate has a specific number of leading zero bits. Only DPs are stored, reducing memory by a factor of 2^DP while preserving collision detection.
 
-The SOTA method (by RetiredCoder) uses equivalence classes and the negation map to reduce expected operations from `~2.08√n` to `~1.15√n`. PSCKangaroo inherits this method and GPU kernel unchanged.
+The **SOTA method** (by RetiredCoder) uses equivalence classes and the negation map to reduce expected operations from ~2.08√n to ~1.15√n. PSCKangaroo inherits this method and GPU kernel unchanged.
 
 ### What PSCKangaroo adds
 
@@ -218,7 +219,7 @@ The SOTA method (by RetiredCoder) uses equivalence classes and the negation map 
 
 ## Per-GPU Tuning
 
-The default `PNT_GROUP_CNT=48` was empirically validated on RTX 5070 (Blackwell SM 12.0) and is a sensible value for modern Turing+ architectures. Other GPUs may benefit from a different setting.
+The default **`PNT_GROUP_CNT=48`** was empirically validated on RTX 5070 (Blackwell SM 12.0) and is a sensible value for modern Turing+ architectures. Other GPUs may benefit from a different setting.
 
 To find your GPU's optimum, use the included sweep script:
 
@@ -233,28 +234,28 @@ By default it tests `PNT_GROUP_CNT ∈ {12, 16, 24, 32, 48}` × `OCCUPANCY ∈ {
 OCC_LIST="1" PNT_LIST="32 48 56 64" ./scripts/bench_psck.sh
 ```
 
-If a configuration other than the default wins on your hardware by a meaningful margin, please open a PR or Issue with the results — would help build a per-architecture tuning table over time.
+If a configuration other than the default wins on your hardware by a meaningful margin, please open a [PR or Issue](https://github.com/pscamillo/PSCKangaroo/issues) with the results — would help build a per-architecture tuning table over time.
 
 ## Command-Line Options
 
 | Option | Description | Default |
 |---|---|---|
-| `-gpu N` | GPU index(es) — e.g., `0` for one GPU, `01` for two (multi-GPU is experimental) | `0` |
+| `-gpu N` | GPU index(es) — e.g., `0` for one GPU, `01` for two (multi-GPU is experimental) | 0 |
 | `-dp N` | Distinguished point bits (6–60) | — |
 | `-range N` | Key range in bits (32–170) | — |
 | `-pubkey <hex>` | Target compressed public key | — |
 | `-start <hex>` | Range start offset | — |
 | `-ramlimit N` | RAM limit in GB | — |
-| `-concurrent 1` | v59 concurrent mode (recommended) | `0` |
-| `-allwild 0/1` | 0 = ALL-TAME, 1 = ALL-WILD | `0` |
-| `-wwbuffer N` | W-W buffer: N% of RAM (0–20) | `0` |
-| `-checkpoint N` | Auto-save interval in hours (0 = off) | `4` |
+| `-concurrent 1` | v59 concurrent mode (recommended) | 0 |
+| `-allwild 0/1` | 0 = ALL-TAME, 1 = ALL-WILD | 0 |
+| `-wwbuffer N` | W-W buffer: N% of RAM (0–20) | 0 |
+| `-checkpoint N` | Auto-save interval in hours (0 = off) | 4 |
 | `-savefile <f>` | Checkpoint filename | `wild_checkpoint.dat` |
 | `-loadwild <f>` | Load checkpoint and resume | — |
-| `-groups N` | Points per batch inversion (8–256) — see Per-GPU Tuning above | `48` |
+| `-groups N` | Points per batch inversion (8–256) — see [Per-GPU Tuning](#per-gpu-tuning) | **48** |
 | `-savedps <f>` | Save evicted DPs to file | — |
-| `-waveinterval N` | Minutes between WILD wave renewals (0 = off) | `0` |
-| `-rotation 0/1` | Table freeze (0) or rotation (1) | `0` |
+| `-waveinterval N` | Minutes between WILD wave renewals (0 = off) | 0 |
+| `-rotation 0/1` | Table freeze (0) or rotation (1) | 0 |
 
 ## Build
 
@@ -276,7 +277,7 @@ Requirements: Visual Studio 2022 + CUDA Toolkit 12.8+ (with VS integration).
 
 1. Clone the repository
 2. Open `PSCKangaroo.sln` in Visual Studio
-3. Select `Release | x64`
+3. Select **Release | x64**
 4. Build (F7)
 
 The `.vcxproj` targets CUDA 12.8. If you have a different CUDA version, right-click the project → Build Dependencies → Build Customizations → select your installed CUDA version.
@@ -304,12 +305,12 @@ The `.vcxproj` targets CUDA 12.8. If you have a different CUDA version, right-cl
 | GPU | Speed | Notes |
 |---|---|---|
 | RTX 5070 Ti (Blackwell) | ~4.5 GKeys/s | Confirmed by user (Windows, v59) |
-| RTX 5070 (Blackwell) | ~3.3 GKeys/s | Tested (Linux, v60 default `PNT_GROUP_CNT=48`) |
+| RTX 5070 (Blackwell) | **~3.3 GKeys/s** | Tested (Linux, v60 default `PNT_GROUP_CNT=48`) |
 | RTX 5070 × 2 (multi-GPU) | ~5.8 GKeys/s | Confirmed by user (Linux, experimental, v59) |
 | RTX 2070 (Turing) | ~1.2 GKeys/s | Confirmed by user (Windows, v59) |
 | GTX 1060 (Pascal) | ~0.19 GKeys/s | Confirmed by user (Linux, v59) |
 
-**Note:** v60 introduced `PNT_GROUP_CNT=48` as the new default after empirical sweep on RTX 5070 (+27% over previous 24). Other architectures may benefit from different values — see the [Per-GPU Tuning](#per-gpu-tuning) section to find your GPU's optimum.
+> **Note:** v60 introduced `PNT_GROUP_CNT=48` as the new default after empirical sweep on RTX 5070 (+27% over previous 24). Other architectures may benefit from different values — see the [Per-GPU Tuning](#per-gpu-tuning) section to find your GPU's optimum.
 
 ## Design History
 
@@ -327,66 +328,60 @@ The original PSCKangaroo architecture used sequential TRAP/HUNT phases — fill 
 
 ### The PNT_GROUP_CNT lesson (v60)
 
-The default `PNT_GROUP_CNT` had been `24` since v52, when an experimental jump to `200` caused 12 KB of register spill per thread (catastrophic L1 cache thrashing). The rollback to 24 was conservative — the value was chosen for being known safe, not from empirical sweep across valid alternatives.
+The default `PNT_GROUP_CNT` had been **24** since v52, when an experimental jump to 200 caused 12 KB of register spill per thread (catastrophic L1 cache thrashing). The rollback to 24 was conservative — the value was chosen for being known safe, not from empirical sweep across valid alternatives.
 
-In v60, an empirical sweep on RTX 5070 (Blackwell SM 12.0) tested `PNT_GROUP_CNT ∈ {12, 16, 24, 32, 48, 56, 64}` × `OCCUPANCY ∈ {1, 2}`. PNT=48 + OCC=1 won by +27% over the previous default (2.62 → 3.33 GKeys/s sustained), with zero register spill. The amortization of batch inversion (one ModInv per N MulModPs) turned out to be the dominant factor — not occupancy. PNT=64 was marginally worse; PNT=56 was clearly worse (it doesn't align with the 16-thread tile structure of the kernel).
+In v60, an empirical sweep on RTX 5070 (Blackwell SM 12.0) tested `PNT_GROUP_CNT ∈ {12, 16, 24, 32, 48, 56, 64}` × `OCCUPANCY ∈ {1, 2}`. **PNT=48 + OCC=1 won by +27% over the previous default** (2.62 → 3.33 GKeys/s sustained), with zero register spill. The amortization of batch inversion (one ModInv per N MulModPs) turned out to be the dominant factor — not occupancy. PNT=64 was marginally worse; PNT=56 was clearly worse (it doesn't align with the 16-thread tile structure of the kernel).
 
 This gain came purely from re-tuning a constant — no algorithmic change. Other GPU architectures may have different optima; the included `scripts/bench_psck.sh` automates the sweep.
 
 ## Changelog
 
 ### v60 (current — PNT_GROUP_CNT tuning)
-
-- Default `PNT_GROUP_CNT` raised from 24 to 48 after empirical sweep on RTX 5070 (Blackwell SM 12.0)
+- **Default `PNT_GROUP_CNT` raised from 24 to 48** after empirical sweep on RTX 5070 (Blackwell SM 12.0)
 - Speed: 2.62 → 3.33 GKeys/s sustained (+27%) with zero register spill
 - Gain comes from better batch inversion amortization, not microarchitectural tweaks
 - New `scripts/bench_psck.sh` automates per-GPU sweep — other architectures (Ada, Ampere, Turing) may have different optima
 
 ### v59 (concurrent mode)
-
-- Concurrent mode: 33% TAME + 67% WILD from second 1, quadratic (t²) collision growth
+- **Concurrent mode:** 33% TAME + 67% WILD from second 1, quadratic (t²) collision growth
 - New CLI flag: `-concurrent 1`
 - Auto-transitions to 100% WILDs when table reaches 93% capacity
 - Stats display shows TAMEs growing + WILDs hunting simultaneously
 
 ### v58 (W-W buffer)
-
 - Small hash table (5–10% of RAM) for WILD1-WILD2 cross-collision detection
 - New CLI flag: `-wwbuffer N`
 
 ### v57 (kTimesG cleanup)
-
 - Removed GPU endomorphism canonical form, cheap second point, XDP, GPU Bloom filter
 
 ### v56C
-
 - Ultra-compact 16-byte DP entries (+56% capacity vs 25-byte format)
 - Async BSGS resolver (4 threads, precomputed baby table)
 
 ### v53
-
 - ALL-TAME mode, table freeze
 
 ### Earlier versions
-
 - Dual hash table, uniform jumps, shard-locked reads
 
 ## Credits
 
-- **RetiredCoder (RC)** — Original [RCKangaroo](https://github.com/RetiredC/RCKangaroo), SOTA method, GPU kernel, batch Montgomery inversion, PTX assembly. The core algorithm is entirely his work.
-- **JeanLucPons** — Foundational Kangaroo/VanitySearch/BSGS implementations.
+- **[RetiredCoder (RC)](https://github.com/RetiredC)** — Original RCKangaroo, SOTA method, GPU kernel, batch Montgomery inversion, PTX assembly. The core algorithm is entirely his work.
+- **[JeanLucPons](https://github.com/JeanLucPons)** — Foundational Kangaroo/VanitySearch/BSGS implementations.
 - **kTimesG** — Critical feedback on endomorphism/cheap point/XDP that led to the v57 cleanup.
-- **pscamillo** — Concurrent mode (v59), W-W buffer (v58), ALL-TAME mode, 16-byte compact entries, async BSGS resolver, checkpoint system, table freeze, `-ramlimit`, PNT_GROUP_CNT empirical tuning (v60).
-- **Tools / AI assistance:** Anthropic Claude (pair-programming for design, debugging, documentation).
+- **pscamillo** — Concurrent mode (v59), W-W buffer (v58), ALL-TAME mode, 16-byte compact entries, async BSGS resolver, checkpoint system, table freeze, `-ramlimit`, **PNT_GROUP_CNT empirical tuning (v60)**.
+  - Tools / AI assistance: Anthropic Claude (pair-programming for design, debugging, documentation).
 
 ## See also
 
-- [mr_blackwell](https://github.com/pscamillo/mr_blackwell) — Native Miller-Rabin GPU kernel for Blackwell SM 12.0.
-- [beal_bigint](https://github.com/pscamillo/beal_bigint) — GPU search for Beal conjecture counterexamples using the by-C^z parametrization.
+[mr_blackwell](https://github.com/pscamillo/mr_blackwell) — Native Miller-Rabin GPU kernel for Blackwell SM 12.0.
+
+[beal_bigint](https://github.com/pscamillo/beal_bigint) — GPU search for Beal conjecture counterexamples using the by-C^z parametrization.
 
 ## License
 
-GPLv3 — see [LICENSE](LICENSE). Derivative work of RCKangaroo.
+GPLv3 — see [LICENSE](LICENSE). Derivative work of [RCKangaroo](https://github.com/RetiredC/RCKangaroo).
 
 ## Disclaimer
 
@@ -394,10 +389,10 @@ This software is provided for educational and research purposes. Solving Bitcoin
 
 ## Supporting development
 
-If this project is useful to you, consider starring the repository — it helps visibility and signals to others that the work matters.
+If this project is useful to you, consider **starring the repository** — it helps visibility and signals to others that the work matters.
 
 If you want to support continued development directly:
 
-- **BTC (bech32):** `bc1q62axpzhteksv4yhqhfzvmeqqq98gcvzfak0etk`
+**BTC (bech32):** `bc1q62axpzhteksv4yhqhfzvmeqqq98gcvzfak0etk`
 
 Hardware, electricity, and tooling costs are real, though partially offset by solar power. Contributions of code, benchmarks, bug reports, and documentation are also welcome — open an issue or pull request.
